@@ -9,9 +9,10 @@
 		<relativePath /> <!-- lookup parent from repository -->
 	</parent>
 
-	<groupId>com.easysoft.stm</groupId>
+	<!-- io.github.<user> is verified automatically on Maven Central for the matching GitHub account -->
+	<groupId>io.github.ponnuchamymariappanadar</groupId>
 	<artifactId>stm</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
+	<version>0.1.0</version>
 	<packaging>jar</packaging>
 
 	<name>STM</name>
@@ -29,11 +30,14 @@
 	<scm>
 		<url>https://github.com/ponnuchamymariappanadar/stm</url>
 		<connection>scm:git:https://github.com/ponnuchamymariappanadar/stm.git</connection>
+		<developerConnection>scm:git:https://github.com/ponnuchamymariappanadar/stm.git</developerConnection>
 	</scm>
 
 	<developers>
 		<developer>
+			<id>ponnuchamymariappanadar</id>
 			<name>Ponnuchamy Mariappanadar</name>
+			<url>https://github.com/ponnuchamymariappanadar</url>
 		</developer>
 	</developers>
 
@@ -41,6 +45,10 @@
 		<java.version>17</java.version>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<jacoco-plugin.version>0.8.13</jacoco-plugin.version>
+		<source-plugin.version>3.3.1</source-plugin.version>
+		<javadoc-plugin.version>3.11.2</javadoc-plugin.version>
+		<gpg-plugin.version>3.2.7</gpg-plugin.version>
+		<central-plugin.version>0.8.0</central-plugin.version>
 	</properties>
 
 	<dependencies>
@@ -141,4 +149,84 @@
 			</plugin>
 		</plugins>
 	</build>
+
+	<profiles>
+		<!--
+			Publishing to Maven Central: `mvn -P release deploy`.
+			Adds the sources and javadoc jars, signs everything with GPG, and uploads to central.sonatype.com.
+			Run by .github/workflows/release.yml; see PUBLISHING.md for the one-time setup.
+		-->
+		<profile>
+			<id>release</id>
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-source-plugin</artifactId>
+						<version>${source-plugin.version}</version>
+						<executions>
+							<execution>
+								<id>attach-sources</id>
+								<goals>
+									<goal>jar-no-fork</goal>
+								</goals>
+							</execution>
+						</executions>
+					</plugin>
+
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-javadoc-plugin</artifactId>
+						<version>${javadoc-plugin.version}</version>
+						<configuration>
+							<doclint>none</doclint>
+							<quiet>true</quiet>
+						</configuration>
+						<executions>
+							<execution>
+								<id>attach-javadocs</id>
+								<goals>
+									<goal>jar</goal>
+								</goals>
+							</execution>
+						</executions>
+					</plugin>
+
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-gpg-plugin</artifactId>
+						<version>${gpg-plugin.version}</version>
+						<configuration>
+							<!-- the passphrase comes from the MAVEN_GPG_PASSPHRASE environment variable -->
+							<gpgArguments>
+								<arg>--pinentry-mode</arg>
+								<arg>loopback</arg>
+							</gpgArguments>
+						</configuration>
+						<executions>
+							<execution>
+								<id>sign-artifacts</id>
+								<phase>verify</phase>
+								<goals>
+									<goal>sign</goal>
+								</goals>
+							</execution>
+						</executions>
+					</plugin>
+
+					<plugin>
+						<groupId>org.sonatype.central</groupId>
+						<artifactId>central-publishing-maven-plugin</artifactId>
+						<version>${central-plugin.version}</version>
+						<extensions>true</extensions>
+						<configuration>
+							<publishingServerId>central</publishingServerId>
+							<!-- uploads and validates; you press "Publish" on central.sonatype.com -->
+							<autoPublish>false</autoPublish>
+						</configuration>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
 </project>

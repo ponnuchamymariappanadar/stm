@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 
 import org.apache.commons.io.IOUtils;
@@ -97,9 +99,12 @@ public class STMOptimizedBuilder<T extends STMContext> {
 	private static Actor<STMContext> returnState = new CallStateReturn();
 	private static Actor<STMContext> resultState = new CallStateResult();
 	private static PassCondition<STMContext> pass = new PassCondition<STMContext>();
-	private static Map<String, String> parameterBeanNameToBeanNameMap = new HashMap<>();
-	private static int stmIndex = 0;
-	private static int fileIndex = 0;
+	// Shared on purpose: beans with identical type and parameters are registered once across all files.
+	// Concurrent/atomic so builders can run in parallel.
+	private static final Map<String, String> parameterBeanNameToBeanNameMap = new ConcurrentHashMap<>();
+	private static final AtomicInteger stmIndex = new AtomicInteger();
+	private static final AtomicInteger fileIndex = new AtomicInteger();
+	private int currentFileIndex;
 
 	int stateIndex = 0;
 	int eventIndex = 0;
@@ -165,7 +170,7 @@ public class STMOptimizedBuilder<T extends STMContext> {
 			postProcessorBeanInfo(stm.postProcessor, fsmName);
 		}
 		stmRoots.add(stm);
-		fileIndex++;
+		currentFileIndex = fileIndex.incrementAndGet();
 		stm.fileName = "<contentPassed>";
 		if (fileName != null) {
 			stm.fileName = fileName;
@@ -366,10 +371,8 @@ public class STMOptimizedBuilder<T extends STMContext> {
 				parameterKey.append(k);
 				parameterKey.append(v);
 			});
-			String otherBeanName = parameterBeanNameToBeanNameMap.get(parameterKey.toString());
-			if (otherBeanName == null) {
-				parameterBeanNameToBeanNameMap.put(parameterKey.toString(), beanRegistrationKey);
-			} else {
+			String otherBeanName = parameterBeanNameToBeanNameMap.putIfAbsent(parameterKey.toString(), beanRegistrationKey);
+			if (otherBeanName != null) {
 				beanRegistrationKey = otherBeanName;
 			}
 		}
@@ -395,7 +398,7 @@ public class STMOptimizedBuilder<T extends STMContext> {
 	}
 
 	public String createBeanName(String stateName, String eventName) {
-		return stateName + "." + eventName + fileIndex;
+		return stateName + "." + eventName + currentFileIndex;
 	}
 
 	@SuppressWarnings({ "unchecked", "rawtypes" })
@@ -683,7 +686,7 @@ public class STMOptimizedBuilder<T extends STMContext> {
 
 	private STMStateful<T> createSTM(StateCollection states, EventCollection events, State defaultState, Event defaultEvent) {
 		validateConfiguration(states);
-		STMStateful<T> f = new STMStateful<T>(stmIndex++, name, defaultState, defaultEvent, states, events);
+		STMStateful<T> f = new STMStateful<T>(stmIndex.getAndIncrement(), name, defaultState, defaultEvent, states, events);
 		if (StringUtils.isBlank(stmPostProcessor) || validateOnly) {
 			return f;
 		}

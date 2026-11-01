@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.0] - 2026-11-01
 
 ### Added
 - JUnit 5 test suite covering the engine, transition types, conditions, case routing, call/return
@@ -21,6 +21,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `scope="prototype"` is honoured for registered actor beans.
 - Result transitions are no longer replaced by the error transition during reduction.
 - The build log now prints the real failed-condition route.
+- `PassCondition` now returns `true` and `FailCondition` returns `false`, as their names say (they were swapped).
+- Builders can run in parallel: shared counters and the bean-name map are now thread-safe.
 
 ### Removed
 - Reactive (asynchronous) transitions: the `reactive` attribute, `<ReactiveResult>`, `ReactiveMethodActor`,
@@ -30,6 +32,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   code used them); replaced by `spring-boot-starter`.
 
 ### Changed
+- Maven coordinates are now `io.github.ponnuchamymariappanadar:stm` (Java packages unchanged).
+- Release profile and workflow for publishing to Maven Central (see PUBLISHING.md).
 - All packages consolidated under `com.easysoft.stm` (`actors`, `condition`, `config`). Update
   `className`/`beanType` values in existing configuration files.
 - Author set to Ponnuchamy Mariappanadar.

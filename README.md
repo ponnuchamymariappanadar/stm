@@ -49,15 +49,18 @@ The configuration says *what happens next*; your code only does the work for eac
 - Maven 3.9+
 - Built on Spring Boot 4.0 dependency management (Jackson XML/YAML, SLF4J, Commons Lang, Guava, Lombok)
 
-The artifact is not yet published to Maven Central. Build it locally with `mvn install` and depend on:
+Add the dependency (available on Maven Central once version 0.1.0 is released; until then, build it
+locally with `mvn install`):
 
 ```xml
 <dependency>
-    <groupId>com.easysoft.stm</groupId>
+    <groupId>io.github.ponnuchamymariappanadar</groupId>
     <artifactId>stm</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>0.1.0</version>
 </dependency>
 ```
+
+The Java packages are `com.easysoft.stm.*`.
 
 ## Quick start
 
@@ -441,6 +444,10 @@ The tests cover the engine (`com.easysoft.stm`), the builder and configuration r
 ## Known issues
 
 See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for open issues and behaviour worth knowing about.
+
+## Releasing
+
+See [PUBLISHING.md](PUBLISHING.md) for publishing a version to Maven Central.
 
 ## Contributing
 

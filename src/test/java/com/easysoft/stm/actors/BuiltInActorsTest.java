@@ -43,13 +43,9 @@ class BuiltInActorsTest {
 		assertEquals("value", new CallStateResult().handle(ctx));
 	}
 
-	/**
-	 * Note: the names are inverted relative to their behaviour. {@code PassCondition} returns
-	 * {@code false} and {@code FailCondition} returns {@code true}. See KNOWN_ISSUES.md.
-	 */
 	@Test
-	void builtInConditionsCurrentBehaviour() {
-		assertEquals(Boolean.FALSE, new PassCondition<STMContext>().handle(context()));
-		assertEquals(Boolean.TRUE, new FailCondition<STMContext>().handle(context()));
+	void passConditionPassesAndFailConditionFails() {
+		assertEquals(Boolean.TRUE, new PassCondition<STMContext>().handle(context()));
+		assertEquals(Boolean.FALSE, new FailCondition<STMContext>().handle(context()));
 	}
 }
