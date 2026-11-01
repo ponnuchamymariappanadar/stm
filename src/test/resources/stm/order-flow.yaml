@@ -1,0 +1,65 @@
+# The same flow as order-flow.xml, in YAML.
+# YAML uses the Java property names: states / transitions / calls / returns / actor / condition / cases / onError / onFailedCondition.
+name: order.flow
+start: order.s
+fire: order.received
+
+onError: { to: failed.s, fire: order.error }
+onFailedCondition: { to: failed.s, fire: order.rejected }
+
+states:
+  - name: order.s
+    transitions:
+      - when: order.received
+        fire: order.validate
+        actor: { className: com.easysoft.stm.example.OrderActions, methodName: receive }
+      - when: order.validate
+        fire: order.pay
+        condition: { className: com.easysoft.stm.example.OrderActions, methodName: isValid }
+    calls:
+      - when: order.pay
+        to: payment.s
+        fire: payment.start
+        cases:
+          - { when: payment.approved, to: shipping.s, fire: ship.choose }
+          - { when: default, to: failed.s, fire: order.declined }
+
+  - name: payment.s
+    transitions:
+      - when: payment.start
+        fire: payment.approved
+        condition: { className: com.easysoft.stm.example.OrderActions, methodName: charge }
+        onFailedCondition: { to: this, fire: payment.declined }
+    returns:
+      - when: payment.approved
+      - when: payment.declined
+
+  - name: shipping.s
+    transitions:
+      - when: ship.choose
+        fire: ship.standard
+        actor: { className: com.easysoft.stm.example.OrderActions, methodName: shippingMethod }
+        cases:
+          - { when: EXPRESS, fire: ship.express }
+      - when: ship.standard
+        fire: order.complete
+        actor: { className: com.easysoft.stm.example.OrderActions, methodName: shipStandard }
+      - when: ship.express
+        fire: order.complete
+        actor: { className: com.easysoft.stm.example.OrderActions, methodName: shipExpress }
+      - when: order.complete
+        stmevent: stop
+
+  - name: failed.s
+    transitions:
+      - when: order.error
+        fire: order.failed
+        actor: { className: com.easysoft.stm.example.OrderActions, methodName: recordError }
+      - when: order.rejected
+        fire: order.failed
+        actor: { className: com.easysoft.stm.example.OrderActions, methodName: reject }
+      - when: order.declined
+        fire: order.failed
+        actor: { className: com.easysoft.stm.example.OrderActions, methodName: decline }
+      - when: order.failed
+        stmevent: stop

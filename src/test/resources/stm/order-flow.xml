@@ -1,0 +1,72 @@
+<!--
+  Example order flow, used by OrderFlowExampleTest and shown in the README.
+
+  order.s     receive the order, validate it, then Call the payment sub-flow
+  payment.s   charge the customer and Return "payment.approved" or "payment.declined"
+  shipping.s  pick a shipping method with Case routing on the actor's return value
+  failed.s    global error / rejection handling
+-->
+<STM name="order.flow" start="order.s" fire="order.received">
+
+	<!-- Defaults for every transition that does not declare its own -->
+	<OnError to="failed.s" fire="order.error" />
+	<OnFailedCondition to="failed.s" fire="order.rejected" />
+
+	<State name="order.s">
+		<Transition when="order.received" fire="order.validate">
+			<Actor className="com.easysoft.stm.example.OrderActions" methodName="receive" />
+		</Transition>
+
+		<Transition when="order.validate" fire="order.pay">
+			<Condition className="com.easysoft.stm.example.OrderActions" methodName="isValid" />
+		</Transition>
+
+		<Call when="order.pay" to="payment.s" fire="payment.start">
+			<Case when="payment.approved" to="shipping.s" fire="ship.choose" />
+			<Case when="default" to="failed.s" fire="order.declined" />
+		</Call>
+	</State>
+
+	<State name="payment.s">
+		<Transition when="payment.start" fire="payment.approved">
+			<Condition className="com.easysoft.stm.example.OrderActions" methodName="charge" />
+			<OnFailedCondition to="this" fire="payment.declined" />
+		</Transition>
+
+		<Return when="payment.approved" />
+		<Return when="payment.declined" />
+	</State>
+
+	<State name="shipping.s">
+		<Transition when="ship.choose" fire="ship.standard">
+			<Actor className="com.easysoft.stm.example.OrderActions" methodName="shippingMethod" />
+			<Case when="EXPRESS" fire="ship.express" />
+		</Transition>
+
+		<Transition when="ship.standard" fire="order.complete">
+			<Actor className="com.easysoft.stm.example.OrderActions" methodName="shipStandard" />
+		</Transition>
+
+		<Transition when="ship.express" fire="order.complete">
+			<Actor className="com.easysoft.stm.example.OrderActions" methodName="shipExpress" />
+		</Transition>
+
+		<Transition when="order.complete" stmevent="stop" />
+	</State>
+
+	<State name="failed.s">
+		<Transition when="order.error" fire="order.failed">
+			<Actor className="com.easysoft.stm.example.OrderActions" methodName="recordError" />
+		</Transition>
+
+		<Transition when="order.rejected" fire="order.failed">
+			<Actor className="com.easysoft.stm.example.OrderActions" methodName="reject" />
+		</Transition>
+
+		<Transition when="order.declined" fire="order.failed">
+			<Actor className="com.easysoft.stm.example.OrderActions" methodName="decline" />
+		</Transition>
+
+		<Transition when="order.failed" stmevent="stop" />
+	</State>
+</STM>

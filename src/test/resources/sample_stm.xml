@@ -1,0 +1,79 @@
+<STM name="com.stm.sample">
+	<OnError to="sample.error.s" fire="sample.error.start.e"/>
+	<OnFailedCondition to="sample.error.s" fire="sample.error.start.e"/>
+	
+	<State name="check.authentication.s">
+		<Transition when="check.authentication.start.e" to="this" fire="auth.check.session" />
+
+		<Transition when="auth.check.session" to="this" fire="validate.session.user">
+			<Condition beanType="com.easysoft.stm.STMTest" methodName="normalConditon"/>
+			<OnFailedCondition to="this" fire="send.to.authentication.page" />
+		</Transition>
+
+		<Transition when="validate.session.user" to="this" fire="send.to.authentication.page">
+			<Condition beanType="com.easysoft.stm.STMTest" methodName="normalConditon" />
+			<OnFailedCondition to="this" fire="send.to.authentication.page" />
+		</Transition>
+
+		<Transition when="send.to.authentication.page" to="this" fire="auth.service.login.success">
+			<Actor beanType="com.easysoft.stm.STMTest"  methodName="getData"/>
+		</Transition>
+		
+		<!-- Call to Login Success and Redirect -->
+		<Call when="auth.service.login.success" to="http.session.creator.callstate.s" fire="http.session.creator.callstate.e">
+			<Case when="auth.service.login.success.done" to="this" fire="authentication.page.show" />
+			<Case when="auth.service.login.done.with.error" to="this" fire="authentication.page.show" />
+			<Case when="default" to="this" fire="authentication.page.show" />
+		</Call>
+
+		<Transition when="authentication.page.show" to="http.end.s" fire="http.end.start.e" />
+	</State>
+	
+	<State name="sample.error.s">
+	   <Transition when="sample.error.start.e" to="this" fire="sample.error.end">
+	      <Actor beanType="com.easysoft.stm.STMTest" methodName="error"></Actor>
+	   </Transition>
+	   
+	   <Transition when="sample.error.end" stmevent="stop"></Transition>
+	</State>
+	
+	<State name="http.end.s">
+	   <Transition when="http.end.start.e" to="this" fire="sample.error.end">
+	     <Actor beanType="com.easysoft.stm.STMTest" methodName="end"></Actor>
+	   </Transition>
+	   
+	   <Transition when="sample.error.end" stmevent="stop"></Transition>
+	</State>
+	
+	
+	<!-- Http Session creator -->
+	<State name="http.session.creator.callstate.s">
+
+		<Transition when="http.session.creator.callstate.e" to="this" fire="http.session.inactivity.time.supplier"></Transition>
+
+		<Transition when="http.session.inactivity.time.supplier" to="this" fire="http.session.created">
+		<Condition beanType="com.easysoft.stm.STMTest" methodName="normalConditon" />
+			<OnFailedCondition to="this" fire="http.session.not.created" />
+		</Transition>
+
+		<Transition when="http.session.creator" to="this" fire="http.session.created">
+			<Condition beanType="com.easysoft.stm.STMTest" methodName="normalConditon" />
+			<OnFailedCondition to="this" fire="http.session.not.created" />
+		</Transition>
+
+		<Transition when="http.session.merge.attribute" to="this" fire="http.session.merged">
+			<Condition beanType="com.easysoft.stm.STMTest" methodName="normalConditon" />
+			<OnFailedCondition to="this" fire="http.session.not.merged" />
+		</Transition>
+
+		<Return when="http.session.created"></Return>
+		
+		<Return when="http.session.not.created"></Return>
+			
+		<Return when="http.session.merged"></Return>
+		
+		<Return when="http.session.not.merged"></Return>
+
+	</State>
+
+</STM>

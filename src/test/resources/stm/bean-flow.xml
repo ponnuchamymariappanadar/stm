@@ -1,0 +1,14 @@
+<!-- Used by STMBeanDefinitionRegistryTest: actors referenced by beanType are registered as Spring beans. -->
+<STM name="bean.flow">
+	<OnError to="bean.s" fire="bean.done" />
+
+	<State name="bean.s">
+		<Transition when="bean.start" fire="bean.next">
+			<Actor beanType="com.easysoft.stm.config.FlowActions" methodName="a" />
+		</Transition>
+		<Transition when="bean.next" fire="bean.done">
+			<Actor beanType="com.easysoft.stm.config.FlowActions" methodName="b" />
+		</Transition>
+		<Transition when="bean.done" stmevent="stop" />
+	</State>
+</STM>
