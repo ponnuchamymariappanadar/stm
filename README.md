@@ -36,6 +36,7 @@ The configuration says *what happens next*; your code only does the work for eac
 - [Core concepts](#core-concepts)
 - [Configuration reference](#configuration-reference)
 - [Writing actors](#writing-actors)
+- [Decision rules](#decision-rules)
 - [Using Spring](#using-spring)
 - [Tracing and debugging](#tracing-and-debugging)
 - [Driving the machine from code](#driving-the-machine-from-code)
@@ -343,6 +344,110 @@ An actor class implements `Actor<YourContext>`. Methods are matched by name and 
 
 The return value is stored as the *last result* (`ctx.getLastSTMResult()`) and is what `<Case>` routes on.
 An actor may also return an `STMEvent` (for example `STMEvent.STOP`) to control the engine directly.
+
+## Decision rules
+
+Instead of writing a condition method for every check, you can describe conditions in a YAML rule file
+and combine them into named decisions. The package is `com.easysoft.decision`; it builds on the engine
+and does not change it.
+
+A **condition** reads a bean property path from the flow context and applies one operator.
+A **decision** combines conditions and other decisions with `and`, `or`, `not` and parentheses.
+An **outcome** picks a named result, such as `APPROVE` or `REVIEW`, for a flow to route on.
+
+```yaml
+# decision/loan-rules.yaml
+name: loan.rules
+conditions:
+  - name: smallAmount
+    path: amount                     # ctx.getAmount()
+    lessOrEqual: 10000
+  - name: vip
+    path: customer.vip               # ctx.getCustomer().isVip()
+    equal: true
+  - name: domestic
+    path: customer.address.country
+    in: [US, CA]
+  - name: blocked
+    path: customer.status            # enums compare by name
+    equal: BLOCKED
+  - name: lowRisk
+    path: attributes[risk]           # map key; tags[0] reads a list element
+    in: [low, medium]
+decisions:
+  - name: autoApprove
+    when: not blocked and smallAmount and domestic and (vip or lowRisk)
+  - name: needsReview
+    when: not autoApprove and not blocked
+```
+
+| Operator | True when the value at `path`... |
+|---|---|
+| `equal` / `notEqual` | equals / does not equal the value (numbers by value, enums by name) |
+| `in` / `notIn` | is / is not one of the listed values |
+| `greaterThan`, `greaterOrEqual`, `lessThan`, `lessOrEqual` | compares as stated; numbers numerically, `Comparable` types such as `LocalDate` via their `parse`/`valueOf` |
+| `isNull` | is `null` (`true`) or not `null` (`false`) |
+| `matches` | as text, matches the regular expression |
+
+A `null` along the path (no customer, no address, a missing map key, an index out of range) gives
+`null`; the ordering operators and `matches` are then false. A property that does not exist on the
+class is an error, so a typo is reported instead of quietly evaluating to false. Unknown names,
+cycles between decisions and malformed expressions fail when the file is loaded. A decision may refer
+to a rule set loaded earlier as `otherSet/name`, and one file may hold several rule sets separated by `---`.
+
+Load the rule file once at startup, then use a decision as a transition condition through
+`DecisionActor`, naming it `ruleSet/name` in `argParameter`:
+
+```java
+DecisionRegistry.getDefault().load("classpath:decision/loan-rules.yaml");
+```
+
+```yaml
+- when: loan.check
+  fire: loan.approve
+  condition: { className: com.easysoft.decision.DecisionActor, methodName: evaluate, argParameter: loan.rules/autoApprove }
+  onFailedCondition: { to: this, fire: loan.triage }
+```
+
+Rules can also be used from code: `registry.evaluate("loan.rules/autoApprove", ctx)`, or
+`registry.getDecision("loan.rules/autoApprove")`, which is itself an `Actor` returning `Boolean`.
+The full example is [`loan-rules.yaml`](src/test/resources/decision/loan-rules.yaml) with
+[`loan-flow.yaml`](src/test/resources/stm/loan-flow.yaml).
+
+### Outcomes: a named result instead of true/false
+
+An **outcome** is an ordered list of `when`/`result` rules: the first rule whose `when` is true gives
+the result, and `default` is the result when none is (without a `default`, no match gives `null`).
+`when` takes the same expressions as a decision.
+
+```yaml
+outcomes:
+  - name: loanOutcome
+    rules:
+      - { when: blocked, result: REJECT }        # checked first
+      - { when: autoApprove, result: APPROVE }
+      - { when: domestic, result: REVIEW }
+    default: REJECT
+```
+
+Use it as a transition's **actor** with `methodName: decide`; the result becomes the last result,
+so the transition's `cases` route on it. A result with no matching case, or `null`, takes the
+transition's own `fire`:
+
+```yaml
+- when: loan.check
+  to: done.s
+  fire: loan.reject                              # REJECT, or anything else without a case
+  actor: { className: com.easysoft.decision.DecisionActor, methodName: decide, argParameter: loan.rules/loanOutcome }
+  cases:
+    - { when: APPROVE, to: done.s, fire: loan.approve }
+    - { when: REVIEW, to: done.s, fire: loan.review }
+```
+
+A case's `to` defaults to the current state, not to the transition's `to`, so give it when the
+target is another state. From code, `registry.decide("loan.rules/loanOutcome", ctx)` returns the
+result as a `String`. An outcome cannot be used inside a `when`, since it is not true/false. The
+full example is [`loan-outcome-flow.yaml`](src/test/resources/stm/loan-outcome-flow.yaml).
 
 ## Using Spring
 

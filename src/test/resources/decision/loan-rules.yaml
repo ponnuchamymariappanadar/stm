@@ -1,0 +1,48 @@
+# Decision rules for the loan example (see stm/loan-flow.yaml).
+# Each condition reads a bean property path from the flow context and applies one operator:
+#   equal, notEqual, in, notIn, greaterThan, greaterOrEqual, lessThan, lessOrEqual, isNull, matches
+# Each decision combines conditions and other decisions with and / or / not and parentheses.
+name: loan.rules
+conditions:
+  - name: smallAmount
+    path: amount
+    lessOrEqual: 10000
+  - name: vip
+    path: customer.vip
+    equal: true
+  - name: goldTier
+    path: customer.tier
+    equal: GOLD
+  - name: domestic
+    path: customer.address.country
+    in: [US, CA]
+  - name: blocked
+    path: customer.status
+    equal: BLOCKED
+  - name: hasEmail
+    path: customer.email
+    isNull: false
+  - name: firstTagNotTest
+    path: tags[0]
+    notEqual: test
+  - name: lowRisk
+    path: attributes[risk]
+    in: [low, medium]
+
+decisions:
+  - name: trusted
+    when: vip or goldTier
+  - name: autoApprove
+    when: not blocked and smallAmount and domestic and (trusted or lowRisk)
+  - name: needsReview
+    when: not autoApprove and not blocked
+
+# An outcome gives a named result instead of true/false: the first rule whose 'when' is true
+# wins, otherwise 'default'. A flow routes on the result with 'cases' (see stm/loan-outcome-flow.yaml).
+outcomes:
+  - name: loanOutcome
+    rules:
+      - { when: blocked, result: REJECT }
+      - { when: autoApprove, result: APPROVE }
+      - { when: domestic, result: REVIEW }
+    default: REJECT

@@ -1,0 +1,38 @@
+# A flow whose conditions are decisions from decision/loan-rules.yaml.
+# DecisionActor.evaluate(context, argParameter) looks the decision up and returns true/false.
+name: loan.flow
+start: loan.s
+fire: loan.check
+
+onError: { to: done.s, fire: loan.error }
+
+states:
+  - name: loan.s
+    transitions:
+      - when: loan.check
+        fire: loan.approve
+        condition: { className: com.easysoft.decision.DecisionActor, methodName: evaluate, argParameter: loan.rules/autoApprove }
+        onFailedCondition: { to: this, fire: loan.triage }
+      - when: loan.triage
+        fire: loan.review
+        condition: { className: com.easysoft.decision.DecisionActor, methodName: evaluate, argParameter: loan.rules/needsReview }
+        onFailedCondition: { to: done.s, fire: loan.reject }
+      - when: loan.approve
+        to: done.s
+        fire: loan.finish
+        actor: { className: com.easysoft.decision.LoanActions, methodName: approve }
+      - when: loan.review
+        to: done.s
+        fire: loan.finish
+        actor: { className: com.easysoft.decision.LoanActions, methodName: review }
+
+  - name: done.s
+    transitions:
+      - when: loan.reject
+        fire: loan.finish
+        actor: { className: com.easysoft.decision.LoanActions, methodName: reject }
+      - when: loan.error
+        fire: loan.finish
+        actor: { className: com.easysoft.decision.LoanActions, methodName: error }
+      - when: loan.finish
+        stmevent: stop
