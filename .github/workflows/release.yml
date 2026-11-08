@@ -24,8 +24,15 @@ jobs:
           gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
           gpg-passphrase: MAVEN_GPG_PASSPHRASE
 
+      # Maven 3.10 leaves maven-metadata-local.xml in the upload bundle and Maven Central rejects it
+      # ("Bundle has content that does NOT have a .pom file"). Build with Maven 3.9 instead.
+      - name: Use Maven 3.9.11
+        run: mvn -B -N wrapper:wrapper -Dmaven=3.9.11
+
       - name: Build, sign and upload
-        run: mvn -B -P release deploy
+        run: |
+          ./mvnw -v
+          ./mvnw -B -P release deploy
         env:
           MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
