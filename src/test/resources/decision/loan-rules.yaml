@@ -2,7 +2,10 @@
 # Each condition reads a bean property path from the flow context and applies one operator:
 #   equal, notEqual, in, notIn, greaterThan, greaterOrEqual, lessThan, lessOrEqual, isNull, matches
 # Each decision combines conditions and other decisions with and / or / not and parentheses.
+# A 'when' can also compare a path inline, e.g. amount > 50000 or customer.address.country not in [US, CA].
 name: loan.rules
+# The bean the rules read: every path and value below is checked against it when the file loads.
+type: com.easysoft.decision.LoanContext
 conditions:
   - name: smallAmount
     path: amount
@@ -36,6 +39,8 @@ decisions:
     when: not blocked and smallAmount and domestic and (trusted or lowRisk)
   - name: needsReview
     when: not autoApprove and not blocked
+  - name: largeForeign
+    when: amount > 50000 and customer.address.country not in [US, CA]
 
 # An outcome gives a named result instead of true/false: the first rule whose 'when' is true
 # wins, otherwise 'default'. A flow routes on the result with 'cases' (see stm/loan-outcome-flow.yaml).

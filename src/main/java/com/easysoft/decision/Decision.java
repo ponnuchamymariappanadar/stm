@@ -1,5 +1,7 @@
 package com.easysoft.decision;
 
+import java.util.List;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,7 +29,7 @@ public final class Decision implements Rule, Actor<STMContext> {
 		this.ruleSet = ruleSet;
 		this.name = name;
 		this.when = when;
-		this.expression = Expression.parse(when, "decision '" + ruleSet + "/" + name + "'");
+		this.expression = Expression.parse(when, "decision '" + name + "'", ruleSet);
 	}
 
 	@Override
@@ -56,6 +58,12 @@ public final class Decision implements Rule, Actor<STMContext> {
 			logger.debug("decision {} [{}] = {}", getKey(), when, result);
 		}
 		return result;
+	}
+
+	/** Evaluates like {@link #evaluate(Object)} and returns why it gave its result. */
+	public Explanation explain(Object root) {
+		Explanation inner = expression.explain(root);
+		return Explanation.of(getKey(), inner.getValue(), List.of(inner));
 	}
 
 	@Override

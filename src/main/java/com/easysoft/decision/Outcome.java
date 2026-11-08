@@ -116,6 +116,32 @@ public final class Outcome implements Actor<STMContext> {
 		return defaultResult;
 	}
 
+	/** Decides like {@link #decide(Object)} and returns why: each rule tried, and the default if used. */
+	public Explanation explain(Object root) {
+		List<Explanation> children = new ArrayList<>();
+		String result = null;
+		boolean matched = false;
+		for (int i = 0; i < branches.size(); i++) {
+			Branch branch = branches.get(i);
+			String label = "rule " + (i + 1) + ": " + branch.when + " -> " + branch.result;
+			if (matched) {
+				children.add(Explanation.skipped(label, List.of()));
+				continue;
+			}
+			Explanation inner = branch.expression.explain(root);
+			children.add(Explanation.of(label, inner.getValue(), List.of(inner)));
+			if (inner.getValue()) {
+				matched = true;
+				result = branch.result;
+			}
+		}
+		if (!matched) {
+			result = defaultResult;
+			children.add(Explanation.of("default -> " + defaultResult, true, List.of()));
+		}
+		return Explanation.outcome(getKey(), result, children);
+	}
+
 	@Override
 	public String handle(STMContext context) {
 		return decide(context);

@@ -13,6 +13,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  *
  * <pre>
  * name: order.rules
+ * type: com.example.OrderContext   # optional: check paths and values when loading
  * conditions:
  *   - name: bigOrder
  *     path: amount
@@ -34,6 +35,11 @@ public class DecisionConfig {
 
 	public String name;
 	public String description;
+	/**
+	 * Optional class name of the bean the rules read, normally your flow context. When given, every
+	 * path and value is checked against it when the file is loaded.
+	 */
+	public String type;
 	public List<ConditionConfig> conditions = new ArrayList<>();
 	public List<DecisionNode> decisions = new ArrayList<>();
 	public List<OutcomeNode> outcomes = new ArrayList<>();

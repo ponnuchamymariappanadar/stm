@@ -109,7 +109,7 @@ class DecisionRegistryTest {
 		assertTrue(e.getMessage().contains("loan.rules/missing"), e.getMessage());
 		assertTrue(registry.getDecision("loan.rules/trusted").handle(loan(1, domestic().vip(true))));
 		assertThrows(DecisionException.class, () -> registry.getDecision("loan.rules/vip"));
-		assertEquals(List.of("smallAmount", "vip", "goldTier", "domestic", "blocked", "hasEmail", "firstTagNotTest", "lowRisk", "trusted", "autoApprove", "needsReview"),
+		assertEquals(List.of("smallAmount", "vip", "goldTier", "domestic", "blocked", "hasEmail", "firstTagNotTest", "lowRisk", "trusted", "autoApprove", "needsReview", "largeForeign"),
 				List.copyOf(registry.getRuleSet("loan.rules").keySet()));
 	}
 
@@ -219,7 +219,7 @@ class DecisionRegistryTest {
 	void decisionsMayReferToAnotherRuleSetLoadedEarlier() {
 		registry.loadYaml("name: promo\ndecisions:\n  - { name: offer, when: loan.rules/trusted and not loan.rules/blocked }\n", "promo");
 		assertTrue(registry.evaluate("promo/offer", loan(1, domestic().vip(true))));
-		assertSame(registry.find("loan.rules/trusted"), ((Expression.Reference) ((Expression.And) registry.getDecision("promo/offer").getExpression()).operands.get(0)).target);
+		assertSame(registry.find("loan.rules/trusted"), ((Expression.Reference) ((Expression.Junction) registry.getDecision("promo/offer").getExpression()).operands.get(0)).target);
 	}
 
 	@Test
@@ -261,7 +261,7 @@ class DecisionRegistryTest {
 		assertLoadFails("conditions:\n  - { name: a, path: amount, equal: 1 }\ndecisions:\n  - { name: d, when: a and }\n", "ends too early");
 		assertLoadFails("conditions:\n  - { name: a, path: amount, equal: 1 }\ndecisions:\n  - { name: d, when: (a }\n", "missing ')'");
 		assertLoadFails("conditions:\n  - { name: a, path: amount, equal: 1 }\ndecisions:\n  - { name: d, when: a a }\n", "unexpected 'a'");
-		assertLoadFails("conditions:\n  - { name: a, path: amount, equal: 1 }\ndecisions:\n  - { name: d, when: 'a = 1' }\n", "unexpected character '='");
+		assertLoadFails("conditions:\n  - { name: a, path: amount, equal: 1 }\ndecisions:\n  - { name: d, when: 'a = 1' }\n", "use '==' to compare");
 		assertLoadFails("decisions:\n  - { name: x, when: y }\n  - { name: y, when: z }\n  - { name: z, when: x }\n", "cycle: x -> y -> z -> x");
 		assertLoadFails("decisions:\n  - { name: x, when: x }\n", "cycle: x -> x");
 		assertLoadFails("decisionz: []\n", "decisionz");

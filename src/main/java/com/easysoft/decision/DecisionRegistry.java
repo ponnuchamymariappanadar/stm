@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -56,6 +57,7 @@ public class DecisionRegistry {
 	private final Map<String, Map<String, Rule>> ruleSets = new LinkedHashMap<>();
 	private final Tree<Outcome> outcomes = new Tree<>();
 	private final Map<String, Map<String, Outcome>> outcomeSets = new LinkedHashMap<>();
+	private final Map<String, Class<?>> types = new HashMap<>();
 
 	/** The registry used by {@link DecisionActor}'s no-argument constructor. */
 	public static DecisionRegistry getDefault() {
@@ -75,11 +77,25 @@ public class DecisionRegistry {
 	 * names of the rule sets loaded.
 	 */
 	public List<String> load(String location) {
-		return loadYaml(read(location), location);
+		return load(location, null);
+	}
+
+	/**
+	 * Loads a rule file and checks every path and value against {@code rootType}, normally your
+	 * flow context class; overrides any {@code type} in the file. {@code null} uses the file's
+	 * {@code type}, if any.
+	 */
+	public List<String> load(String location, Class<?> rootType) {
+		return loadYaml(read(location), location, rootType);
 	}
 
 	/** Loads rule sets from YAML text; {@code source} names it in error messages. */
 	public List<String> loadYaml(String yaml, String source) {
+		return loadYaml(yaml, source, null);
+	}
+
+	/** Loads rule sets from YAML text, checking them against {@code rootType} (see {@link #load(String, Class)}). */
+	public List<String> loadYaml(String yaml, String source, Class<?> rootType) {
 		List<DecisionConfig> configs = new ArrayList<>();
 		try (MappingIterator<DecisionConfig> iterator = mapper.readerFor(DecisionConfig.class).readValues(yaml)) {
 			while (iterator.hasNext()) {
@@ -97,7 +113,7 @@ public class DecisionRegistry {
 		List<String> names = new ArrayList<>();
 		for (DecisionConfig config : configs) {
 			try {
-				names.add(register(config));
+				names.add(register(config, rootType));
 			} catch (DecisionException e) {
 				throw new DecisionException(source + ": " + e.getMessage(), e);
 			}
@@ -107,7 +123,16 @@ public class DecisionRegistry {
 
 	/** Builds, checks and registers one rule set. Returns its name. */
 	public String register(DecisionConfig config) {
+		return register(config, null);
+	}
+
+	/**
+	 * Builds, checks and registers one rule set, checking its paths and values against
+	 * {@code rootType} (or the class named by its {@code type} when {@code rootType} is {@code null}).
+	 */
+	public String register(DecisionConfig config, Class<?> rootType) {
 		String setName = checkName(config.name, "rule set");
+		Class<?> type = rootType != null ? rootType : typeOf(config.type, setName);
 		Map<String, Rule> local = new LinkedHashMap<>();
 		List<Decision> decisions = new ArrayList<>();
 
@@ -166,6 +191,9 @@ public class DecisionRegistry {
 				}
 			}
 			checkCycles(decisions, setName);
+			if (type != null) {
+				throwIfInvalid(setName, type, problems(type, local.values(), localOutcomes.values()));
+			}
 			for (Rule rule : local.values()) {
 				rules.put(rule.getKey(), rule);
 			}
@@ -174,6 +202,9 @@ public class DecisionRegistry {
 			}
 			ruleSets.put(setName, Collections.unmodifiableMap(local));
 			outcomeSets.put(setName, Collections.unmodifiableMap(localOutcomes));
+			if (type != null) {
+				types.put(setName, type);
+			}
 		} finally {
 			lock.writeLock().unlock();
 		}
@@ -217,6 +248,57 @@ public class DecisionRegistry {
 			return decision;
 		}
 		throw new DecisionException("'" + key + "' is a condition, not a decision");
+	}
+
+	/**
+	 * Evaluates the condition, decision or outcome {@code ruleSet/name} against {@code root} and
+	 * returns why it gave its result. The result is the same as {@link #evaluate} or {@link #decide}
+	 * would give: {@link Explanation#getValue()} for a condition or decision,
+	 * {@link Explanation#getResult()} for an outcome.
+	 */
+	public Explanation explain(String key, Object root) {
+		Outcome outcome = findOutcome(key);
+		if (outcome != null) {
+			return outcome.explain(root);
+		}
+		Rule rule = get(key);
+		if (rule instanceof Decision decision) {
+			return decision.explain(root);
+		}
+		return ((Condition) rule).explain(root, rule.getKey());
+	}
+
+	/**
+	 * Checks every path and value of a loaded rule set against {@code rootType}, as loading with a
+	 * type does. Throws {@link DecisionException} listing every problem found.
+	 */
+	public void validate(String ruleSet, Class<?> rootType) {
+		if (rootType == null) {
+			throw new IllegalArgumentException("rootType is null");
+		}
+		Map<String, Rule> set;
+		Map<String, Outcome> setOutcomes;
+		lock.readLock().lock();
+		try {
+			if (!ruleSets.containsKey(ruleSet)) {
+				throw new DecisionException("rule set '" + ruleSet + "' is not loaded; loaded rule sets: " + ruleSets.keySet());
+			}
+			set = ruleSets.get(ruleSet);
+			setOutcomes = outcomeSets.get(ruleSet);
+		} finally {
+			lock.readLock().unlock();
+		}
+		throwIfInvalid(ruleSet, rootType, problems(rootType, set.values(), setOutcomes.values()));
+	}
+
+	/** The class a rule set was checked against when it was loaded, or {@code null}. */
+	public Class<?> getType(String ruleSet) {
+		lock.readLock().lock();
+		try {
+			return types.get(ruleSet);
+		} finally {
+			lock.readLock().unlock();
+		}
 	}
 
 	/** Evaluates the condition or decision {@code ruleSet/name} against {@code root}. */
@@ -336,7 +418,7 @@ public class DecisionRegistry {
 			if (result == null) {
 				throw new DecisionException(ruleLabel + ": result is missing");
 			}
-			Expression expression = Expression.parse(ruleNode.when, ruleLabel);
+			Expression expression = Expression.parse(ruleNode.when, ruleLabel, setName);
 			branches.add(new Outcome.Branch(ruleNode.when.trim(), expression, result));
 		}
 		return new Outcome(setName, name, branches, resultText(node.defaultResult, label + " default"));
@@ -360,6 +442,52 @@ public class DecisionRegistry {
 		int separator = key.indexOf(SEPARATOR);
 		Map<String, Rule> set = ruleSets.get(key.substring(0, separator));
 		return set == null ? null : set.get(key.substring(separator + 1));
+	}
+
+	private static List<String> problems(Class<?> type, Collection<Rule> rules, Collection<Outcome> outcomes) {
+		List<String> problems = new ArrayList<>();
+		for (Rule rule : rules) {
+			if (rule instanceof Condition condition) {
+				addProblem(problems, "condition '" + condition.getName() + "'", condition.validate(type));
+			} else if (rule instanceof Decision decision) {
+				for (Condition comparison : decision.getExpression().comparisons()) {
+					addProblem(problems, "decision '" + decision.getName() + "': '" + comparison.getName() + "'", comparison.validate(type));
+				}
+			}
+		}
+		for (Outcome outcome : outcomes) {
+			List<Outcome.Branch> branches = outcome.getBranches();
+			for (int i = 0; i < branches.size(); i++) {
+				for (Condition comparison : branches.get(i).getExpression().comparisons()) {
+					addProblem(problems, "outcome '" + outcome.getName() + "' rule " + (i + 1) + ": '" + comparison.getName() + "'", comparison.validate(type));
+				}
+			}
+		}
+		return problems;
+	}
+
+	private static void addProblem(List<String> problems, String where, String problem) {
+		if (problem != null) {
+			problems.add(where + ": " + problem);
+		}
+	}
+
+	private static void throwIfInvalid(String setName, Class<?> type, List<String> problems) {
+		if (!problems.isEmpty()) {
+			throw new DecisionException("rule set '" + setName + "' does not fit " + type.getName() + ":\n  " + String.join("\n  ", problems));
+		}
+	}
+
+	private static Class<?> typeOf(String className, String setName) {
+		if (className == null || className.isBlank()) {
+			return null;
+		}
+		try {
+			ClassLoader loader = Thread.currentThread().getContextClassLoader();
+			return Class.forName(className.trim(), false, loader != null ? loader : DecisionRegistry.class.getClassLoader());
+		} catch (ClassNotFoundException e) {
+			throw new DecisionException("rule set '" + setName + "': type " + className.trim() + " is not on the classpath", e);
+		}
 	}
 
 	private static void checkCycles(List<Decision> decisions, String setName) {

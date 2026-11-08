@@ -2,8 +2,13 @@ package com.easysoft.decision;
 
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
+import java.lang.reflect.GenericArrayType;
+import java.lang.reflect.Member;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
+import java.lang.reflect.WildcardType;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -157,6 +162,39 @@ public final class PropertyPath {
 	}
 
 	private Function<Object, Object> findAccessor(Class<?> type, String name) {
+		Member member = findMember(type, name);
+		if (member instanceof Method getter) {
+			getter.trySetAccessible();
+			return bean -> {
+				try {
+					return getter.invoke(bean);
+				} catch (ReflectiveOperationException e) {
+					Throwable cause = e.getCause() != null ? e.getCause() : e;
+					throw new DecisionException("path '" + expression + "': reading " + getter.getName() + "() failed on " + type.getName(), cause);
+				}
+			};
+		}
+		if (member instanceof Field field) {
+			field.trySetAccessible();
+			return bean -> {
+				try {
+					return field.get(bean);
+				} catch (IllegalAccessException e) {
+					throw new DecisionException("path '" + expression + "': reading field " + name + " failed on " + type.getName(), e);
+				}
+			};
+		}
+		throw noProperty(type, name);
+	}
+
+	private DecisionException noProperty(Class<?> type, String name) {
+		String suffix = Character.toUpperCase(name.charAt(0)) + name.substring(1);
+		return new DecisionException("path '" + expression + "': " + type.getName() + " has no property '" + name + "' (looked for get" + suffix + "(), is" + suffix
+				+ "(), " + name + "() and a public field)");
+	}
+
+	/** The getter ({@code getX()}, boolean {@code isX()}, {@code x()}) or public field for {@code name}, or {@code null}. */
+	private static Member findMember(Class<?> type, String name) {
 		String suffix = Character.toUpperCase(name.charAt(0)) + name.substring(1);
 		Method method = publicNoArgMethod(type, "get" + suffix);
 		if (method == null) {
@@ -169,34 +207,98 @@ public final class PropertyPath {
 			method = publicNoArgMethod(type, name);
 		}
 		if (method != null) {
-			Method getter = method;
-			getter.trySetAccessible();
-			return bean -> {
-				try {
-					return getter.invoke(bean);
-				} catch (ReflectiveOperationException e) {
-					Throwable cause = e.getCause() != null ? e.getCause() : e;
-					throw new DecisionException("path '" + expression + "': reading " + getter.getName() + "() failed on " + type.getName(), cause);
-				}
-			};
+			return method;
 		}
 		try {
 			Field field = type.getField(name);
-			if (!Modifier.isStatic(field.getModifiers())) {
-				field.trySetAccessible();
-				return bean -> {
-					try {
-						return field.get(bean);
-					} catch (IllegalAccessException e) {
-						throw new DecisionException("path '" + expression + "': reading field " + name + " failed on " + type.getName(), e);
-					}
-				};
-			}
+			return Modifier.isStatic(field.getModifiers()) ? null : field;
 		} catch (NoSuchFieldException e) {
-			// fall through
+			return null;
 		}
-		throw new DecisionException("path '" + expression + "': " + type.getName() + " has no property '" + name + "' (looked for get" + suffix + "(), is" + suffix + "(), "
-				+ name + "() and a public field)");
+	}
+
+	/**
+	 * Follows this path through declared types, starting at {@code rootType}, and returns the type
+	 * of the value it reads, or {@code null} when that cannot be known before running (a property
+	 * declared as {@code Object}, an interface or abstract class without the property, a raw
+	 * collection). Throws {@link DecisionException} when the path cannot work, for example a
+	 * property that the class does not have.
+	 */
+	public Class<?> resolveType(Class<?> rootType) {
+		Type current = rootType;
+		for (Step step : steps) {
+			Class<?> raw = rawClass(current);
+			if (raw == null || raw == Object.class) {
+				return null;
+			}
+			if (step.index) {
+				if (Map.class.isAssignableFrom(raw)) {
+					current = typeArgument(current, 1, 2);
+				} else if (List.class.isAssignableFrom(raw) || raw.isArray()) {
+					try {
+						Integer.parseInt(step.name);
+					} catch (NumberFormatException e) {
+						throw new DecisionException("path '" + expression + "': [" + step.name + "] needs a number for " + raw.getName());
+					}
+					current = raw.isArray() ? (current instanceof GenericArrayType array ? array.getGenericComponentType() : raw.getComponentType())
+							: typeArgument(current, 0, 1);
+				} else if (isOpen(raw)) {
+					return null;
+				} else {
+					throw new DecisionException("path '" + expression + "': [" + step.name + "] used on " + raw.getName() + ", which is not a list, array or map");
+				}
+			} else if (Map.class.isAssignableFrom(raw)) {
+				current = typeArgument(current, 1, 2);
+			} else {
+				Member member = findMember(raw, step.name);
+				if (member == null) {
+					if (isOpen(raw)) {
+						return null;
+					}
+					throw noProperty(raw, step.name);
+				}
+				current = member instanceof Method method ? method.getGenericReturnType() : ((Field) member).getGenericType();
+			}
+			if (current == null) {
+				return null;
+			}
+		}
+		Class<?> type = rawClass(current);
+		return type == Object.class ? null : type;
+	}
+
+	/** An interface or abstract class: a subclass seen at run time may have more properties. */
+	private static boolean isOpen(Class<?> type) {
+		// primitives report themselves as abstract
+		return !type.isPrimitive() && !type.isArray() && (type.isInterface() || Modifier.isAbstract(type.getModifiers()));
+	}
+
+	private static Type typeArgument(Type type, int index, int expectedCount) {
+		if (type instanceof ParameterizedType parameterized && parameterized.getActualTypeArguments().length == expectedCount) {
+			Type argument = parameterized.getActualTypeArguments()[index];
+			if (argument instanceof WildcardType wildcard) {
+				return wildcard.getUpperBounds()[0];
+			}
+			return argument;
+		}
+		return null;
+	}
+
+	private static Class<?> rawClass(Type type) {
+		if (type instanceof Class<?> c) {
+			return c;
+		}
+		if (type instanceof ParameterizedType parameterized) {
+			return (Class<?>) parameterized.getRawType();
+		}
+		if (type instanceof GenericArrayType array) {
+			Class<?> component = rawClass(array.getGenericComponentType());
+			return component == null ? null : Array.newInstance(component, 0).getClass();
+		}
+		if (type instanceof WildcardType wildcard) {
+			return rawClass(wildcard.getUpperBounds()[0]);
+		}
+		return null;
 	}
 
 	private static Method publicNoArgMethod(Class<?> type, String name) {

@@ -358,6 +358,7 @@ An **outcome** picks a named result, such as `APPROVE` or `REVIEW`, for a flow t
 ```yaml
 # decision/loan-rules.yaml
 name: loan.rules
+type: com.easysoft.decision.LoanContext   # optional: check every path and value when loading
 conditions:
   - name: smallAmount
     path: amount                     # ctx.getAmount()
@@ -413,6 +414,75 @@ Rules can also be used from code: `registry.evaluate("loan.rules/autoApprove", c
 `registry.getDecision("loan.rules/autoApprove")`, which is itself an `Actor` returning `Boolean`.
 The full example is [`loan-rules.yaml`](src/test/resources/decision/loan-rules.yaml) with
 [`loan-flow.yaml`](src/test/resources/stm/loan-flow.yaml).
+
+### Inline comparisons
+
+A `when` can compare a path directly, so a named condition is only needed when you want to reuse it:
+
+```yaml
+decisions:
+  - name: largeForeign
+    when: amount > 50000 and customer.address.country not in [US, CA]
+  - name: fastTrack
+    when: vip and (customer.tier == GOLD or attributes[risk] == low)
+```
+
+| Inline form | Same as |
+|---|---|
+| `path == v`, `path != v` | `equal`, `notEqual` |
+| `path > v`, `>=`, `<`, `<=` | `greaterThan`, `greaterOrEqual`, `lessThan`, `lessOrEqual` |
+| `path in [a, b]`, `path not in [a, b]` | `in`, `notIn` |
+| `path matches 'regex'` | `matches` |
+| `path is null`, `path is not null` | `isNull: true`, `isNull: false` |
+
+Unquoted `true`, `false`, `null` and numbers are typed; any other unquoted word is text, so
+`customer.status == BLOCKED` compares with the enum constant. Quote text that contains spaces or
+punctuation (`'me@corp.com'`); a backslash escapes a quote. Comparisons bind tighter than `not`,
+`and` and `or`, so `not amount > 5` means `not (amount > 5)`. In YAML, quote the whole `when` if it
+starts with `!`, `[` or a quote, or contains `: ` or ` #`.
+
+### Checking rules against your context class
+
+With `type:` in the rule file, or `registry.load(location, LoanContext.class)`, every path and value
+is checked when the file is loaded, and the file is rejected with all problems listed together:
+
+```
+rule set 'loan.rules' does not fit com.easysoft.decision.LoanContext:
+  condition 'vip': path 'customer.vipp': ...LoanContext$Customer has no property 'vipp' ...
+  decision 'fastTrack': 'customer.tier == GOLDD': path 'customer.tier' (Tier): 'GOLDD' is not one of SILVER, GOLD
+```
+
+It catches missing properties, enum values that are not constants, `true`/`false` and numbers that
+are not, ordering on enums, booleans or non-`Comparable` types, `null` tests on primitives, and dates
+that do not parse. Generic types are followed (`List<String>`, `Map<String, X>`); a path through a
+property declared as `Object`, an interface or an abstract class is left to run time, since the
+actual object may have more properties. `registry.validate("loan.rules", LoanContext.class)` checks a
+rule set that is already loaded.
+
+### Explaining a result
+
+`registry.explain(key, ctx)` evaluates a condition, decision or outcome exactly as `evaluate` or
+`decide` would, and returns an `Explanation` tree: every part's value, the bean values read, and the
+parts skipped by short-circuiting. Its `toString()` is ready for a log or an audit record:
+
+```
+loan.rules/loanOutcome = REVIEW
+  rule 1: blocked -> REJECT = false
+    blocked = false  [customer.status is ACTIVE; equal 'BLOCKED']
+  rule 2: autoApprove -> APPROVE = false
+    autoApprove = false
+      and = false
+        not = true
+          blocked = false  [customer.status is ACTIVE; equal 'BLOCKED']
+        smallAmount = false  [amount is 50000; lessOrEqual 10000]
+        domestic  (not evaluated)
+        (trusted or lowRisk)  (not evaluated)
+  rule 3: domestic -> REVIEW = true
+    domestic = true  [customer.address.country is 'US'; in ['US', 'CA']]
+```
+
+The same information is available as data through `getValue()`, `getResult()`, `getDetail()` and
+`getChildren()`.
 
 ### Outcomes: a named result instead of true/false
 
