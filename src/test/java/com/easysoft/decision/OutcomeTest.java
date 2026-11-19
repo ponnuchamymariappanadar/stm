@@ -21,7 +21,7 @@ import com.easysoft.stm.STMContext;
 import com.easysoft.stm.STMStateful;
 import com.easysoft.stm.config.STMOptimizedBuilder;
 
-/** Outcomes: decisions with a named result, on their own and routing a flow through cases. */
+/** Outcomes: decisions with a named result, on their own and routing a flow through a rule's outcomes. */
 class OutcomeTest {
 
 	private static DecisionRegistry previous;

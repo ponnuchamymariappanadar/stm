@@ -4,6 +4,43 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - Unreleased
+
+### Changed (breaking)
+- Flows are YAML only. XML flow files, `ConfigXMLReader` and the `jackson-dataformat-xml` dependency
+  are removed; `addFile` rejects any file that does not end in `.yaml` or `.yml`.
+- Flow keys are renamed, and the old names are rejected:
+
+  | Old | New |
+  |---|---|
+  | `start` | `startStage` |
+  | `states` | `stages` |
+  | `transitions` | `steps` |
+  | `actor` | `action` |
+  | `condition` | `check` |
+  | `onFailedCondition` | `onFalse` |
+  | `to` (steps, outcomes, `onError`, `onFalse`) | `nextStage` |
+  | `fire` (top level) | `startStep` |
+  | `fire` (steps, outcomes, `onError`, `onFalse`) | `then` |
+  | `stmevent` | `control` |
+  | `cases` | `outcomes` |
+  | `when` (steps and `returns`; outcomes keep `when`) | `step` |
+  | `className`, `methodName` | `class`, `method` |
+  | `calls: [ { when, to, ... } ]` | a `steps` entry with `runStage` |
+  | an outcome with `when: default` | `otherwise: { nextStage, then }` on the step |
+  | top-level `onError` / `onFalse` | `defaults: { onError, onFalse }` |
+  | `argParameter` | `input` |
+  | `stmFiles` | `include` (a list or comma-separated text) |
+
+  Builder error messages use the new names. Internal field names (such as `fileName`) are rejected as keys.
+
+### Added
+- `com.easysoft.decision`: conditions, decisions and outcomes in YAML rule files, with inline
+  comparisons, load-time type checking and `explain()`.
+- `input` on an `action` or `check` also takes a map of names to texts, passed as
+  `method(ctx, Map<String, String>)`; values are text exactly as written.
+  A method whose second parameter does not fit the input now fails the build instead of the run.
+
 ## [0.1.0] - 2026-11-01
 
 ### Added

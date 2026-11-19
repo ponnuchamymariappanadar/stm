@@ -1,6 +1,7 @@
 package com.easysoft.stm.example;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
@@ -9,15 +10,15 @@ import org.junit.jupiter.api.Test;
 import com.easysoft.stm.STM.STMEvent;
 import com.easysoft.stm.STMContext;
 import com.easysoft.stm.STMStateful;
+import com.easysoft.stm.config.ConfigYAMLReader;
 import com.easysoft.stm.config.STMOptimizedBuilder;
 
 /**
- * Runs the example order flow from the README, loaded from both XML and YAML, and checks that
- * every path behaves the same way in both formats.
+ * Runs the example order flow from the README and checks every path.
  */
 class OrderFlowExampleTest {
 
-	private static final String[] CONFIGS = { "classpath:stm/order-flow.xml", "classpath:stm/order-flow.yaml" };
+	private static final String[] CONFIGS = { "classpath:stm/order-flow.yaml" };
 
 	private static STMStateful<STMContext> load(String location) throws Exception {
 		STMOptimizedBuilder<STMContext> builder = new STMOptimizedBuilder<>(null, false);
@@ -55,10 +56,23 @@ class OrderFlowExampleTest {
 	}
 
 	@Test
-	void declinedPaymentReturnsThroughTheDefaultCase() throws Exception {
+	void declinedPaymentReturnsThroughOtherwise() throws Exception {
 		for (String config : CONFIGS) {
 			assertEquals(List.of("received", "charge refused", "declined"), place(config, "A-4", 5000, false), config);
 		}
+	}
+
+	@Test
+	void theCreditLimitComesFromTheFlowInput() throws Exception {
+		// the same flow with creditLimit 10000 instead of 1000: the 5000 order is now charged
+		String yaml = STMOptimizedBuilder.readContent(CONFIGS[0]);
+		assertTrue(yaml.contains("input: { creditLimit: 1000 }"), "the example flow sets the limit with input");
+		STMOptimizedBuilder<STMContext> builder = new STMOptimizedBuilder<>(null, false);
+		builder.add(new ConfigYAMLReader(), yaml.replace("input: { creditLimit: 1000 }", "input: { creditLimit: 10000 }"), "order-flow-10000.yaml");
+		STMStateful<STMContext> stm = builder.build();
+		OrderContext order = new OrderContext(stm.createContext(), "A-5", 5000, false);
+		assertEquals(STMEvent.STOP, order.getSTMContext().start(order));
+		assertEquals(List.of("received", "charged", "shipped standard"), order.getHistory());
 	}
 
 	@Test
@@ -66,15 +80,5 @@ class OrderFlowExampleTest {
 		for (String config : CONFIGS) {
 			assertEquals(List.of("error: order id is required"), place(config, null, 100, false), config);
 		}
-	}
-
-	@Test
-	void xmlAndYamlProduceTheSameMachine() throws Exception {
-		STMStateful<STMContext> xml = load(CONFIGS[0]);
-		STMStateful<STMContext> yaml = load(CONFIGS[1]);
-		assertEquals(xml.getName(), yaml.getName());
-		assertEquals(xml.getStates().getStates().size(), yaml.getStates().getStates().size());
-		assertEquals(xml.getDefaultStartState().getName(), yaml.getDefaultStartState().getName());
-		assertEquals(xml.getDefaultStartEvent().getName(), yaml.getDefaultStartEvent().getName());
 	}
 }

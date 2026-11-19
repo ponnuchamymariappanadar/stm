@@ -43,7 +43,7 @@ decisions:
     when: amount > 50000 and customer.address.country not in [US, CA]
 
 # An outcome gives a named result instead of true/false: the first rule whose 'when' is true
-# wins, otherwise 'default'. A flow routes on the result with 'cases' (see stm/loan-outcome-flow.yaml).
+# wins, otherwise 'default'. A flow routes on the result with a rule's 'outcomes' (see stm/loan-outcome-flow.yaml).
 outcomes:
   - name: loanOutcome
     rules:

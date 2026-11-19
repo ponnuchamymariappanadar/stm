@@ -7,26 +7,26 @@ import com.easysoft.stm.STMContext;
  * The bridge between flow configuration and decision rules: a condition actor that evaluates a
  * named condition or decision against the flow's context and returns {@code Boolean}.
  * <p>
- * In flow YAML, name the decision with {@code argParameter}; the builder then calls
+ * In flow YAML, name the decision with {@code input}; the builder then calls
  * {@link #evaluate(STMContext, String)}:
  *
  * <pre>
- * - when: order.validate
- *   fire: order.pay
- *   condition: { className: com.easysoft.decision.DecisionActor, methodName: evaluate, argParameter: order.rules/canPay }
- *   onFailedCondition: { to: failed.s, fire: order.rejected }
+ * - step: validate
+ *   then: pay
+ *   check: { class: com.easysoft.decision.DecisionActor, method: evaluate, input: order.rules/canPay }
+ *   onFalse: { nextStage: failed, then: rejected }
  * </pre>
  *
- * For an {@link Outcome}, use it as the transition's actor with {@code methodName: decide} and route
- * on the result with {@code cases}:
+ * For an {@link Outcome}, use it as the step's {@code action} with {@code method: decide} and route
+ * on the result with the step's {@code outcomes}:
  *
  * <pre>
- * - when: loan.check
- *   fire: loan.reject                  # when no case matches
- *   actor: { className: com.easysoft.decision.DecisionActor, methodName: decide, argParameter: loan.rules/loanOutcome }
- *   cases:
- *     - { when: APPROVE, fire: loan.approve }
- *     - { when: REVIEW, fire: loan.review }
+ * - step: assess
+ *   then: reject                       # when no outcome matches
+ *   action: { class: com.easysoft.decision.DecisionActor, method: decide, input: loan.rules/loanOutcome }
+ *   outcomes:
+ *     - { when: APPROVE, then: approve }
+ *     - { when: REVIEW, then: review }
  * </pre>
  *
  * The rule file must be loaded into {@link DecisionRegistry#getDefault()} before the flow runs. As
@@ -38,7 +38,7 @@ public class DecisionActor implements Actor<STMContext> {
 	private final DecisionRegistry registry;
 	private final String decision;
 
-	/** Uses {@link DecisionRegistry#getDefault()}; this is the constructor used for {@code className}. */
+	/** Uses {@link DecisionRegistry#getDefault()}; this is the constructor used for {@code class}. */
 	public DecisionActor() {
 		this(null, null);
 	}
@@ -60,7 +60,7 @@ public class DecisionActor implements Actor<STMContext> {
 
 	/**
 	 * Returns the named result of the outcome {@code key} ({@code ruleSet/name}). Used as a
-	 * transition actor, the result becomes the last result and the transition's {@code cases} route on it.
+	 * transition actor, the result becomes the last result and the step's {@code outcomes} route on it.
 	 */
 	public String decide(STMContext context, String key) {
 		return registry().decide(key, context);
@@ -70,7 +70,7 @@ public class DecisionActor implements Actor<STMContext> {
 	@Override
 	public Boolean handle(STMContext context) {
 		if (decision == null) {
-			throw new DecisionException("DecisionActor has no decision; use methodName: evaluate with argParameter: ruleSet/name");
+			throw new DecisionException("DecisionActor has no decision; use method: evaluate with input: ruleSet/name");
 		}
 		return evaluate(context, decision);
 	}

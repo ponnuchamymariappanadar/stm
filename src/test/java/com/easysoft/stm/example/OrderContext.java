@@ -7,7 +7,7 @@ import com.easysoft.stm.STMContext;
 import com.easysoft.stm.StatefulContext;
 
 /**
- * Example context for the order flow in {@code src/test/resources/stm/order-flow.xml}.
+ * Example context for the order flow in {@code src/test/resources/stm/order-flow.yaml}.
  * Your context holds your business data plus the engine's {@link StatefulContext}.
  */
 public class OrderContext implements STMContext {

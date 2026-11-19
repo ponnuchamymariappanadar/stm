@@ -1,0 +1,112 @@
+# Used by STMValidationTest: a larger flow checked in validate-only mode (no actors are created).
+name: com.stm.sample
+defaults:
+  onError:
+    nextStage: sample.error.s
+    then: sample.error.start.e
+  onFalse:
+    nextStage: sample.error.s
+    then: sample.error.start.e
+stages:
+- name: check.authentication.s
+  steps:
+  - step: check.authentication.start.e
+    nextStage: this
+    then: auth.check.session
+  - step: auth.check.session
+    nextStage: this
+    then: validate.session.user
+    check:
+      beanType: com.easysoft.stm.STMTest
+      method: normalConditon
+    onFalse:
+      nextStage: this
+      then: send.to.authentication.page
+  - step: validate.session.user
+    nextStage: this
+    then: send.to.authentication.page
+    check:
+      beanType: com.easysoft.stm.STMTest
+      method: normalConditon
+    onFalse:
+      nextStage: this
+      then: send.to.authentication.page
+  - step: send.to.authentication.page
+    nextStage: this
+    then: auth.service.login.success
+    action:
+      beanType: com.easysoft.stm.STMTest
+      method: getData
+  - step: authentication.page.show
+    nextStage: http.end.s
+    then: http.end.start.e
+  - step: auth.service.login.success
+    runStage: http.session.creator.callstate.s
+    then: http.session.creator.callstate.e
+    outcomes:
+    - when: auth.service.login.success.done
+      nextStage: this
+      then: authentication.page.show
+    - when: auth.service.login.done.with.error
+      nextStage: this
+      then: authentication.page.show
+    otherwise:
+      nextStage: this
+      then: authentication.page.show
+- name: sample.error.s
+  steps:
+  - step: sample.error.start.e
+    nextStage: this
+    then: sample.error.end
+    action:
+      beanType: com.easysoft.stm.STMTest
+      method: error
+  - step: sample.error.end
+    control: stop
+- name: http.end.s
+  steps:
+  - step: http.end.start.e
+    nextStage: this
+    then: sample.error.end
+    action:
+      beanType: com.easysoft.stm.STMTest
+      method: end
+  - step: sample.error.end
+    control: stop
+- name: http.session.creator.callstate.s
+  steps:
+  - step: http.session.creator.callstate.e
+    nextStage: this
+    then: http.session.inactivity.time.supplier
+  - step: http.session.inactivity.time.supplier
+    nextStage: this
+    then: http.session.created
+    check:
+      beanType: com.easysoft.stm.STMTest
+      method: normalConditon
+    onFalse:
+      nextStage: this
+      then: http.session.not.created
+  - step: http.session.creator
+    nextStage: this
+    then: http.session.created
+    check:
+      beanType: com.easysoft.stm.STMTest
+      method: normalConditon
+    onFalse:
+      nextStage: this
+      then: http.session.not.created
+  - step: http.session.merge.attribute
+    nextStage: this
+    then: http.session.merged
+    check:
+      beanType: com.easysoft.stm.STMTest
+      method: normalConditon
+    onFalse:
+      nextStage: this
+      then: http.session.not.merged
+  returns:
+  - step: http.session.created
+  - step: http.session.not.created
+  - step: http.session.merged
+  - step: http.session.not.merged

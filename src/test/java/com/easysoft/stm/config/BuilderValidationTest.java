@@ -16,199 +16,240 @@ import com.easysoft.stm.STMException;
 /** The builder must reject invalid configurations with a clear {@link STMException}. */
 class BuilderValidationTest {
 
-	private static final String END = "<Transition when='end' stmevent='stop'/>";
+	private static final String END = "{ step: end, control: stop }";
 
-	private static void assertRejected(String xml, String expectedMessagePart) {
-		assertRejected(xml, true, expectedMessagePart);
+	private static void assertRejected(String yaml, String expectedMessagePart) {
+		assertRejected(yaml, true, expectedMessagePart);
 	}
 
-	private static void assertRejected(String xml, boolean reduce, String expectedMessagePart) {
-		STMException e = assertThrows(STMException.class, () -> builder(xml, reduce).build());
+	private static void assertRejected(String yaml, boolean reduce, String expectedMessagePart) {
+		STMException e = assertThrows(STMException.class, () -> builder(yaml, reduce).build());
 		assertTrue(e.getMessage().contains(expectedMessagePart), "expected message containing '" + expectedMessagePart + "' but was: " + e.getMessage());
 	}
 
 	@Test
 	void emptyMachineHasNoStartState() {
-		assertRejected("<STM name='empty'/>", "Default state for stmStateful missing");
+		assertRejected("{ name: empty }", "Default state for stmStateful missing");
 	}
 
 	@Test
 	void duplicateWhenInTheSameState() {
-		assertRejected(machine("<State name='s'>"
-				+ "<Transition when='start' fire='end'>" + actor("a") + "</Transition>"
-				+ "<Transition when='start' fire='end'>" + actor("b") + "</Transition>"
-				+ END + "</State>"), "duplicated in the same state s when=start");
+		assertRejected(machine("{ name: s, steps: [ "
+				+ "{ step: start, then: end, action: " + actor("a") + " }, "
+				+ "{ step: start, then: end, action: " + actor("b") + " }, "
+				+ END + " ] }"), "duplicated in the same state s step=start");
 	}
 
 	@Test
 	void sameStateDefinedTwice() {
-		assertRejected(machine("<State name='s'><Transition when='start' fire='end'>" + actor("a") + "</Transition>" + END + "</State>"
-				+ "<State name='s'><Transition when='other' fire='end'>" + actor("a") + "</Transition></State>"), "State s already defined");
+		assertRejected(machine("{ name: s, steps: [ "
+				+ "{ step: start, then: end, action: " + actor("a") + " }, "
+				+ END + " ] }, "
+				+ "{ name: s, steps: [ "
+				+ "{ step: other, then: end, action: " + actor("a") + " } ] }"), "State s already defined");
 	}
 
 	@Test
 	void stateWithoutName() {
-		assertRejected(machine("<State><Transition when='start' stmevent='stop'>" + actor("a") + "</Transition></State>"), "cannot be null");
+		assertRejected(machine("{ steps: [ "
+				+ "{ step: start, control: stop, action: " + actor("a") + " } ] }"), "cannot be null");
 	}
 
 	@Test
 	void transitionWithoutWhen() {
-		assertRejected(machine("<State name='s'><Transition fire='end'>" + actor("a") + "</Transition>" + END + "</State>"), "<when> missing");
+		assertRejected(machine("{ name: s, steps: [ "
+				+ "{ then: end, action: " + actor("a") + " }, "
+				+ END + " ] }"), "step missing");
 	}
 
 	@Test
 	void toWithoutFire() {
-		assertRejected(machine("<State name='s'><Transition when='start' to='s'>" + actor("a") + "</Transition></State>"), "both <fire><to> should be defined");
+		assertRejected(machine("{ name: s, steps: [ "
+				+ "{ step: start, nextStage: s, action: " + actor("a") + " } ] }"), "both then and nextStage should be defined");
 	}
 
 	@Test
 	void fireThatGoesNowhere() {
-		assertRejected(machine("<State name='s'><Transition when='start' fire='missing'>" + actor("a") + "</Transition></State>"), "Transition missing");
+		assertRejected(machine("{ name: s, steps: [ "
+				+ "{ step: start, then: missing, action: " + actor("a") + " } ] }"), "Transition missing");
 	}
 
 	@Test
 	void missingOnErrorWhenNoGlobalHandler() {
-		assertRejected("<STM name='x'><State name='s'><Transition when='start' fire='end'>" + actor("a") + "</Transition>" + END + "</State></STM>",
-				"Missing local <OnError> and global <OnError>");
+		assertRejected("{ name: x, stages: [ "
+				+ "{ name: s, steps: [ "
+				+ "{ step: start, then: end, action: " + actor("a") + " }, "
+				+ END + " ] } ] }",
+				"Missing onError on the step and under defaults");
 	}
 
 	@Test
 	void conditionWithoutAnyOnFailedCondition() {
-		assertRejected("<STM name='x'><OnError to='s' fire='end'/><State name='s'>"
-				+ "<Transition when='start' fire='end'>" + condition("flag") + "</Transition>"
-				+ "<Transition when='end' stmevent='stop'>" + actor("a") + "</Transition></State></STM>",
-				"Missing local <OnFailedCondition> and global <onFailedCondition>");
+		assertRejected("{ name: x, defaults: { onError: { nextStage: s, then: end } }, stages: [ "
+				+ "{ name: s, steps: [ "
+				+ "{ step: start, then: end, check: " + condition("flag") + " }, "
+				+ "{ step: end, control: stop, action: " + actor("a") + " } ] } ] }",
+				"Missing onFalse on the step and under defaults");
 	}
 
 	@Test
 	void onErrorPointingToUnknownState() {
-		assertRejected(machine("<State name='s'><Transition when='start' fire='end'>" + actor("a")
-				+ "<OnError to='nowhere' fire='x'/></Transition>" + END + "</State>"), "state not exist for <state> nowhere");
+		assertRejected(machine("{ name: s, steps: [ "
+				+ "{ step: start, then: end, action: " + actor("a") + ", onError: { nextStage: nowhere, then: x } }, "
+				+ END + " ] }"), "state not exist for stage nowhere");
 	}
 
 	@Test
 	void onErrorPointingToUnknownEvent() {
-		assertRejected(machine("<State name='s'><Transition when='start' fire='end'>" + actor("a")
-				+ "<OnError to='this' fire='nope'/></Transition>" + END + "</State>"), "transition not exist for <fire> nope");
+		assertRejected(machine("{ name: s, steps: [ "
+				+ "{ step: start, then: end, action: " + actor("a") + ", onError: { nextStage: this, then: nope } }, "
+				+ END + " ] }"), "transition not exist for then nope");
 	}
 
 	@Test
 	void callWithoutReturn() {
-		assertRejected(machine("start='main' fire='start'", "<State name='main'>"
-				+ "<Call when='start' to='sub' fire='go'><Case when='default' fire='end'/></Call>" + END + "</State>"
-				+ "<State name='sub'><Transition when='go' stmevent='stop'>" + actor("a") + "</Transition></State>"),
+		assertRejected(machine("startStage: main, startStep: start", "{ name: main, steps: [ "
+				+ "{ step: start, runStage: sub, then: go, otherwise: { then: end } }, "
+				+ END + " ] }, "
+				+ "{ name: sub, steps: [ "
+				+ "{ step: go, control: stop, action: " + actor("a") + " } ] }"),
 				"Call state dont have return defined sub");
 	}
 
 	@Test
 	void callWithoutDefaultCase() {
-		assertRejected(machine("start='main' fire='start'", "<State name='main'>"
-				+ "<Call when='start' to='sub' fire='go'><Case when='ok' fire='end'/></Call>" + END + "</State>"
-				+ "<State name='sub'><Transition when='go' fire='ok'>" + actor("a") + "</Transition><Return when='ok'/></State>"),
-				"default as it is mandatory for Call");
+		assertRejected(machine("startStage: main, startStep: start", "{ name: main, steps: [ "
+				+ "{ step: start, runStage: sub, then: go, outcomes: [ { when: ok, then: end } ] }, "
+				+ END + " ] }, "
+				+ "{ name: sub, steps: [ "
+				+ "{ step: go, then: ok, action: " + actor("a") + " } ], returns: [ "
+				+ "{ step: ok } ] }"),
+				"Missing otherwise, which is mandatory for a runStage step");
 	}
 
 	@Test
 	void plainTransitionIntoAReturnState() {
-		assertRejected(machine("start='main' fire='start'", "<State name='main'>"
-				+ "<Call when='start' to='sub' fire='go'><Case when='default' fire='end'/></Call>"
-				+ "<Transition when='sneak' to='sub' fire='go'>" + actor("b") + "</Transition>"
-				+ END + "</State>"
-				+ "<State name='sub'><Transition when='go' fire='ok'>" + actor("a") + "</Transition><Return when='ok'/></State>"),
-				"To State dont have any call or Return node");
+		assertRejected(machine("startStage: main, startStep: start", "{ name: main, steps: [ "
+				+ "{ step: start, runStage: sub, then: go, otherwise: { then: end } }, "
+				+ "{ step: sneak, nextStage: sub, then: go, action: " + actor("b") + " }, "
+				+ END + " ] }, "
+				+ "{ name: sub, steps: [ "
+				+ "{ step: go, then: ok, action: " + actor("a") + " } ], returns: [ "
+				+ "{ step: ok } ] }"),
+				"To State dont have any runStage step or returns entry");
 	}
 
 	@Test
 	void caseOnATransitionWithoutActor() {
-		assertRejected(machine("<State name='s'><Transition when='start' fire='end'><Case when='x' fire='end'/></Transition>" + END + "</State>"),
-				"cases not allowed for place holder transition");
+		assertRejected(machine("{ name: s, steps: [ "
+				+ "{ step: start, then: end, outcomes: [ { when: x, then: end } ] }, "
+				+ END + " ] }"),
+				"outcomes not allowed for place holder transition");
 	}
 
 	@Test
 	void caseOnAConditionOnlyTransition() {
-		assertRejected(machine("<State name='s'><Transition when='start' fire='end'>" + condition("flag")
-				+ "<Case when='x' fire='end'/></Transition>" + END + "</State>"), "condition with out any handler");
+		assertRejected(machine("{ name: s, steps: [ "
+				+ "{ step: start, then: end, check: " + condition("flag") + ", outcomes: [ { when: x, then: end } ] }, "
+				+ END + " ] }"), "condition with out any handler");
 	}
 
 	@Test
 	void caseWithoutFire() {
-		assertRejected(machine("<State name='s'><Transition when='start' fire='end'>" + actor("route")
-				+ "<Case when='x'/></Transition>" + END + "</State>"), "Missing <case> <when> x");
+		assertRejected(machine("{ name: s, steps: [ "
+				+ "{ step: start, then: end, action: " + actor("route") + ", outcomes: [ { when: x } ] }, "
+				+ END + " ] }"), "Missing outcome when x");
 	}
 
 	@Test
 	void caseToUnknownTransition() {
-		assertRejected(machine("<State name='s'><Transition when='start' fire='end'>" + actor("route")
-				+ "<Case when='x' fire='start' to='error.s'/></Transition>" + END + "</State>"), "Missing transition for <case> <when> x");
+		assertRejected(machine("{ name: s, steps: [ "
+				+ "{ step: start, then: end, action: " + actor("route") + ", outcomes: [ { when: x, then: start, nextStage: error.s } ] }, "
+				+ END + " ] }"), "Missing transition for outcome when x");
 	}
 
 	@Test
 	void placeHolderThatLoopsToItself() {
-		String xml = machine("<State name='s'><Transition when='start' fire='start'/></State>");
-		assertRejected(xml, true, "Loop on the transiton");
-		assertRejected(xml, false, "Transition is looping");
+		String yaml = machine("{ name: s, steps: [ "
+				+ "{ step: start, then: start } ] }");
+		assertRejected(yaml, true, "Loop on the transiton");
+		assertRejected(yaml, false, "Transition is looping");
 	}
 
 	@Test
 	void placeHolderCycleIsDetected() {
-		assertRejected(machine("<State name='s'><Transition when='start' fire='p1'/><Transition when='p1' fire='start'/></State>"),
+		assertRejected(machine("{ name: s, steps: [ "
+				+ "{ step: start, then: p1 }, "
+				+ "{ step: p1, then: start } ] }"),
 				"Loop on the transiton");
 	}
 
 	@Test
 	void unknownActorMethod() {
-		assertRejected(machine("<State name='s'><Transition when='start' fire='end'>" + actor("noSuchMethod") + "</Transition>" + END + "</State>"),
+		assertRejected(machine("{ name: s, steps: [ "
+				+ "{ step: start, then: end, action: " + actor("noSuchMethod") + " }, "
+				+ END + " ] }"),
 				"handler is null");
 	}
 
 	@Test
 	void conditionMethodMustReturnBoolean() {
-		assertRejected(machine("<State name='s'><Transition when='start' fire='end'>" + condition("notABoolean") + "</Transition>" + END + "</State>"),
+		assertRejected(machine("{ name: s, steps: [ "
+				+ "{ step: start, then: end, check: " + condition("notABoolean") + " }, "
+				+ END + " ] }"),
 				"handler is null");
 	}
 
 	@Test
 	void unknownActorClass() {
-		assertRejected(machine("<State name='s'><Transition when='start' fire='end'><Actor className='com.example.DoesNotExist'/></Transition>" + END + "</State>"),
+		assertRejected(machine("{ name: s, steps: [ "
+				+ "{ step: start, then: end, action: { class: com.example.DoesNotExist } }, "
+				+ END + " ] }"),
 				"create handler instance failed");
 	}
 
 	@Test
 	void reactiveConfigurationIsNotSupported() {
-		assertThrows(STMException.class, () -> new STMOptimizedBuilder<STMContext>(null, false).add(new ConfigXMLReader(),
-				machine("<State name='s'><Transition when='start' fire='end' reactive='true'>" + actor("a") + "</Transition>" + END + "</State>"),
-				"reactive.xml"));
+		assertThrows(STMException.class, () -> new STMOptimizedBuilder<STMContext>(null, false).add(new ConfigYAMLReader(),
+				machine("{ name: s, steps: [ "
+						+ "{ step: start, then: end, reactive: 'true', action: " + actor("a") + " }, "
+						+ END + " ] }"),
+				"reactive.yaml"));
 	}
 
 	@Test
 	void unknownEnumPlaceholder() {
-		assertThrows(STMException.class, () -> build(machine("<State name='s'><Transition when='e:com.example.Nope.X' stmevent='stop'>"
-				+ actor("a") + "</Transition></State>")));
+		assertThrows(STMException.class, () -> build(machine("{ name: s, steps: [ "
+				+ "{ step: 'e:com.example.Nope.X', control: stop, action: " + actor("a") + " } ] }")));
 	}
 
 	@Test
 	void unknownStmEventValue() {
 		assertThrows(IllegalArgumentException.class,
-				() -> build(machine("<State name='s'><Transition when='start' fire='end' stmevent='pause'>" + actor("a") + "</Transition>" + END + "</State>")));
+				() -> build(machine("{ name: s, steps: [ "
+						+ "{ step: start, then: end, control: pause, action: " + actor("a") + " }, "
+						+ END + " ] }")));
 	}
 
 	@Test
-	void malformedXml() {
-		assertThrows(STMException.class, () -> new STMOptimizedBuilder<STMContext>(null, false).add(new ConfigXMLReader(), "<STM name='x'><State>", "bad.xml"));
+	void malformedYaml() {
+		assertThrows(STMException.class, () -> new STMOptimizedBuilder<STMContext>(null, false).add(new ConfigYAMLReader(), "{ name: x, stages: [ { name: s", "bad.yaml"));
 	}
 
 	@Test
 	void validateOnlyModeChecksStructureWithoutCreatingActors() {
 		// Actor classes are not loaded in validate-only mode, so a missing class is not an error...
 		STMOptimizedBuilder<STMContext> b = new STMOptimizedBuilder<>(null, true);
-		b.add(new ConfigXMLReader(), machine("<State name='s'><Transition when='start' fire='end'><Actor className='com.example.DoesNotExist'/></Transition>" + END
-				+ "</State>"), "validate-only-ok.xml");
+		b.add(new ConfigYAMLReader(), machine("{ name: s, steps: [ "
+				+ "{ step: start, then: end, action: { class: com.example.DoesNotExist } }, "
+				+ END + " ] }"), "validate-only-ok.yaml");
 		b.build();
 
 		// ...but structural problems still are.
 		STMOptimizedBuilder<STMContext> bad = new STMOptimizedBuilder<>(null, true);
-		bad.add(new ConfigXMLReader(), machine("<State name='s'><Transition when='start' fire='missing'>" + actor("a") + "</Transition></State>"),
-				"validate-only-bad.xml");
+		bad.add(new ConfigYAMLReader(), machine("{ name: s, steps: [ "
+				+ "{ step: start, then: missing, action: " + actor("a") + " } ] }"),
+				"validate-only-bad.yaml");
 		assertThrows(STMException.class, bad::build);
 	}
 }

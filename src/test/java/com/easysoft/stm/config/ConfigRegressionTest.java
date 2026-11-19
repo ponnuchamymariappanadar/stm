@@ -28,23 +28,23 @@ class ConfigRegressionTest {
 
 	@Test
 	void builtInConditionsRouteAsTheirNamesSay() {
-		String xml = Stm.machine("<State name='s'>"
-				+ "<Transition when='start' fire='next'><Condition className='" + PassCondition.class.getName() + "'/></Transition>"
-				+ "<Transition when='next' fire='end'><Condition className='" + FailCondition.class.getName() + "'/>"
-				+ "  <OnFailedCondition to='this' fire='failed'/></Transition>"
-				+ "<Transition when='failed' fire='end'>" + actor("localRejected") + "</Transition>"
-				+ "<Transition when='end' stmevent='stop'/></State>");
-		assertEquals(List.of("localRejected"), run(Stm.build(xml)).log);
+		String yaml = Stm.machine("{ name: s, steps: [ "
+				+ "{ step: start, then: next, check: { class: '" + PassCondition.class.getName() + "' } }, "
+				+ "{ step: next, then: end, check: { class: '" + FailCondition.class.getName() + "' }, onFalse: { nextStage: this, then: failed } }, "
+				+ "{ step: failed, then: end, action: " + actor("localRejected") + " }, "
+				+ "{ step: end, control: stop } ] }");
+		assertEquals(List.of("localRejected"), run(Stm.build(yaml)).log);
 	}
 
 	@Test
 	void buildersCanRunInParallelAndGetUniqueIds() throws Exception {
-		String xml = Stm.machine("<State name='s'><Transition when='go' stmevent='stop'>" + actor("a") + "</Transition></State>");
+		String yaml = Stm.machine("{ name: s, steps: [ "
+				+ "{ step: go, control: stop, action: " + actor("a") + " } ] }");
 		ExecutorService pool = Executors.newFixedThreadPool(8);
 		try {
 			List<Callable<STMStateful<STMContext>>> jobs = new ArrayList<>();
 			for (int i = 0; i < 32; i++) {
-				jobs.add(() -> Stm.build(xml));
+				jobs.add(() -> Stm.build(yaml));
 			}
 			Set<Integer> ids = new HashSet<>();
 			for (Future<STMStateful<STMContext>> f : pool.invokeAll(jobs)) {
@@ -61,12 +61,13 @@ class ConfigRegressionTest {
 	@Test
 	void globalHandlersCanLiveInAnIncludeOnlyMainFile() throws Exception {
 		Path dir = Files.createTempDirectory("stm-known");
-		Path part = dir.resolve("part.xml");
-		Files.write(part, ("<STM name='part'><State name='s'>"
-				+ "<Transition when='go' fire='end'>" + actor("a") + "</Transition>"
-				+ "<Transition when='end' stmevent='stop'/></State></STM>").getBytes(StandardCharsets.UTF_8));
-		Path main = dir.resolve("main.xml");
-		Files.write(main, ("<STM name='main' stmFiles='" + part + "'><OnError to='s' fire='end'/></STM>").getBytes(StandardCharsets.UTF_8));
+		Path part = dir.resolve("part.yaml");
+		Files.write(part, ("{ name: part, stages: [ "
+				+ "{ name: s, steps: [ "
+				+ "{ step: go, then: end, action: " + actor("a") + " }, "
+				+ "{ step: end, control: stop } ] } ] }").getBytes(StandardCharsets.UTF_8));
+		Path main = dir.resolve("main.yaml");
+		Files.write(main, ("{ name: main, include: '" + part + "', defaults: { onError: { nextStage: s, then: end } } }").getBytes(StandardCharsets.UTF_8));
 
 		STMOptimizedBuilder<STMContext> b = new STMOptimizedBuilder<>(null, false);
 		b.addFile(main.toString());

@@ -4,7 +4,7 @@ import com.easysoft.stm.STM.STMEvent;
 
 /**
  * A transition guarded by a condition: the actor runs only if the condition returns
- * {@code Boolean.TRUE}; otherwise the flow goes to the {@code OnFailedCondition} transition.
+ * {@code Boolean.TRUE}; otherwise the flow goes to the {@code onFalse} transition.
  */
 public class ConditionAndActor extends Transition {
 	Transition onFailedConditionTransition;

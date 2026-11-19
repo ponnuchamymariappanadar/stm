@@ -1,12 +1,14 @@
 package com.easysoft.stm.config;
 
+import java.util.Map;
+
 import com.easysoft.stm.Actor;
 import com.easysoft.stm.TestContext;
 
 /**
- * Actor used by the XML/YAML-driven tests. Each method records what it did in
+ * Actor used by the YAML-driven tests. Each method records what it did in
  * {@link TestContext#log}. Referenced from configuration as
- * {@code className="com.easysoft.stm.config.FlowActions" methodName="..."}.
+ * {@code { class: com.easysoft.stm.config.FlowActions, method: ... }}.
  */
 public class FlowActions implements Actor<TestContext> {
 
@@ -66,6 +68,17 @@ public class FlowActions implements Actor<TestContext> {
 	public Object route(TestContext c) {
 		c.log.add("route");
 		return c.data.get("route");
+	}
+
+	/** {@code input} as a map. */
+	public Object withSettings(TestContext c, Map<String, String> input) {
+		c.log.add("settings:" + input);
+		return input.get("mode");
+	}
+
+	/** A check with {@code input} as a map. */
+	public boolean underLimit(TestContext c, Map<String, String> input) {
+		return Integer.parseInt(input.get("amount")) <= Integer.parseInt(input.get("limit"));
 	}
 
 	public Object withArg(TestContext c, String arg) {

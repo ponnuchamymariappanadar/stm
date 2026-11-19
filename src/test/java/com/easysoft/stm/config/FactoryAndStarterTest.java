@@ -25,11 +25,10 @@ class FactoryAndStarterTest {
 
 	private static final AtomicInteger SEQ = new AtomicInteger();
 
-	private static final String FLOW = Stm.machine("<State name='s'>"
-			+ "<Transition when='start' fire='next'>" + actor("a") + "</Transition>"
-			+ "<Transition when='next' fire='end'>" + actor("b") + "</Transition>"
-			+ "<Transition when='end' stmevent='stop'/>"
-			+ "</State>");
+	private static final String FLOW = Stm.machine("{ name: s, steps: [ "
+			+ "{ step: start, then: next, action: " + actor("a") + " }, "
+			+ "{ step: next, then: end, action: " + actor("b") + " }, "
+			+ "{ step: end, control: stop } ] }");
 
 	private static STMFactory factory(String name) {
 		STMFactory f = new STMFactory();

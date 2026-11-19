@@ -1,0 +1,21 @@
+# Used by STMBeanDefinitionRegistryTest: actors referenced by beanType are registered as Spring beans.
+name: bean.flow
+defaults:
+  onError:
+    nextStage: bean.s
+    then: bean.done
+stages:
+- name: bean.s
+  steps:
+  - step: bean.start
+    then: bean.next
+    action:
+      beanType: com.easysoft.stm.config.FlowActions
+      method: a
+  - step: bean.next
+    then: bean.done
+    action:
+      beanType: com.easysoft.stm.config.FlowActions
+      method: b
+  - step: bean.done
+    control: stop

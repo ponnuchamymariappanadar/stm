@@ -1,19 +1,20 @@
 package com.easysoft.stm.example;
 
+import java.util.Map;
+
 import com.easysoft.stm.Actor;
 
 /**
- * Example actor for the order flow. Each public method is referenced from the configuration
- * by {@code methodName}. Actor methods take the context and return any value; condition
- * methods must return {@code boolean}/{@code Boolean}.
+ * Example actor for the order flow. Each public method is referenced from the flow by
+ * {@code method}. Actions take the context and return any value; checks must return
+ * {@code boolean}/{@code Boolean}. A method can also take the step's {@code input}: text as a
+ * {@code String}, a map as a {@code Map<String, String>}.
  */
 public class OrderActions implements Actor<OrderContext> {
 
 	public enum Shipping {
 		STANDARD, EXPRESS
 	}
-
-	static final int CREDIT_LIMIT = 1000;
 
 	public Object receive(OrderContext order) {
 		if (order.getOrderId() == null) {
@@ -27,8 +28,9 @@ public class OrderActions implements Actor<OrderContext> {
 		return order.getAmount() > 0;
 	}
 
-	public boolean charge(OrderContext order) {
-		boolean approved = order.getAmount() <= CREDIT_LIMIT;
+	/** A check whose limit comes from the flow: {@code input: { creditLimit: 1000 }}. */
+	public boolean charge(OrderContext order, Map<String, String> input) {
+		boolean approved = order.getAmount() <= Integer.parseInt(input.get("creditLimit"));
 		order.record(approved ? "charged" : "charge refused");
 		return approved;
 	}

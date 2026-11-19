@@ -10,7 +10,7 @@ public class STMValidationTest {
 	void test() throws Exception {
 		STMOptimizedBuilder<STMContext> builder = new STMOptimizedBuilder<STMContext>(null, true, true);
 		builder.setDebug(true);
-		builder.addFile("src/test/resources/sample_stm.xml");
+		builder.addFile("src/test/resources/sample_stm.yaml");
 		STMStateful<STMContext> stm = builder.build();
 		STMSample stmSample = new STMSample(stm.createContextWithTrace());
 		Transition transition = stm.getState("check.authentication.s").getTransition(stm.getEvent("check.authentication.start.e"));

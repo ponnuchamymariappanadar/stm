@@ -7,7 +7,7 @@ Thanks for your interest in improving STM. Bug reports, documentation fixes and 
 Open an issue with:
 
 - what you expected and what happened instead,
-- the smallest configuration (XML/YAML) and actor code that shows the problem,
+- the smallest flow YAML and actor code that shows the problem,
 - your Java version and how you build the machine (plain builder or Spring).
 
 A failing JUnit test is the best possible bug report.
@@ -35,7 +35,7 @@ mvn verify
 | Path | Contents |
 |---|---|
 | `src/main/java/com/easysoft/stm` | The engine: states, events, transitions, contexts, tracing |
-| `src/main/java/com/easysoft/stm/config` | XML/YAML readers, the builder, Spring integration |
+| `src/main/java/com/easysoft/stm/config` | The YAML reader, the builder, Spring integration |
 | `src/main/java/com/easysoft/stm/actors` | Built-in actors (Call/Return, no-op) |
 | `src/test/java/...` | JUnit 5 tests; `TestContext` and `FlowActions` are the shared fixtures |
 | `src/test/resources/stm` | Example flows used by the tests and the README |

@@ -1,6 +1,8 @@
 package com.easysoft.stm.config;
 
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -8,108 +10,181 @@ import java.util.Map;
 import java.util.Set;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlElementWrapper;
-import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlProperty;
-import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlRootElement;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
+import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.JsonDeserializer;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 
+import lombok.AccessLevel;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.Setter;
 
 /**
- * Parses configuration text into an {@link STMRoot}. {@link ConfigXMLReader} and
- * {@link ConfigYAMLReader} are the implementations; the nested classes are the configuration model.
+ * Parses flow YAML into an {@link STMRoot}. {@link ConfigYAMLReader} is the implementation; the
+ * nested classes are the configuration model. The YAML keys are the Java field names; the one
+ * exception is {@code class}, a Java keyword, held in {@code className}. {@code defaults},
+ * {@code otherwise} and {@code input} are read by setters, and a {@code steps} entry with
+ * {@code runStage} is a call.
  */
 public interface ConfigReader {
-	<T> T parse(String xml);
+	<T> T parse(String yaml);
 
 	@Data
-	@JacksonXmlRootElement(localName = "STM")
 	public static class STMRoot {
-		@JacksonXmlProperty(isAttribute = true)
 		String name;
-
-		@JacksonXmlProperty(isAttribute = true)
-		String start;
-
-		@JacksonXmlProperty(isAttribute = true)
-		String fire;
-
-		@JacksonXmlProperty(localName = "OnFailedCondition")
-		ConditionFailedNode onFailedCondition;
-
-		@JacksonXmlProperty(localName = "OnError")
+		String startStage;
+		String startStep;
+		/** Set through {@code defaults: { onFalse }}. */
+		@JsonIgnore
+		ConditionFailedNode onFalse;
+		/** Set through {@code defaults: { onError }}. */
+		@JsonIgnore
 		ErrorNode onError;
-
-		@JacksonXmlElementWrapper(useWrapping = false)
-		@JacksonXmlProperty(localName = "State")
-		List<StateNode> states;
-
-		@JacksonXmlProperty(isAttribute = true)
-		String stmFiles;
+		List<StateNode> stages;
+		/** More flow files, as a YAML list or a comma-separated text. */
+		@JsonDeserialize(using = IncludeDeserializer.class)
+		String include;
 
 		@JsonIgnore
 		String fileName;
-		
-		@JacksonXmlProperty(isAttribute = true)
 		String postProcessor;
 
-		public List<StateNode> getStates() {
-			if (states == null) {
-				states = new ArrayList<StateNode>();
+		public List<StateNode> getStages() {
+			if (stages == null) {
+				stages = new ArrayList<StateNode>();
 			}
-			return states;
+			return stages;
+		}
+
+		/** {@code defaults}: the {@code onError} and {@code onFalse} routes for every step that has none. */
+		@JsonSetter("defaults")
+		void setDefaults(DefaultsNode defaults) {
+			if (defaults != null) {
+				onError = defaults.onError;
+				onFalse = defaults.onFalse;
+			}
+		}
+
+		@JsonSetter("onError")
+		void rejectTopLevelOnError(Object ignored) {
+			throw new IllegalArgumentException("a top-level onError moved under defaults: write defaults: { onError: { nextStage, then } }");
+		}
+
+		@JsonSetter("onFalse")
+		void rejectTopLevelOnFalse(Object ignored) {
+			throw new IllegalArgumentException("a top-level onFalse moved under defaults: write defaults: { onFalse: { nextStage, then } }");
+		}
+	}
+
+	/** The top-level {@code defaults} block. */
+	@Data
+	public static class DefaultsNode {
+		ErrorNode onError;
+		ConditionFailedNode onFalse;
+	}
+
+	/**
+	 * Reads {@code input} as text exactly as written in the file ({@code 1.50} stays "1.50"), either
+	 * a single text or a read-only map of names to texts. A nested map, a list or an empty value is an
+	 * error.
+	 */
+	public static class InputDeserializer extends JsonDeserializer<Object> {
+		@Override
+		public Object deserialize(JsonParser parser, DeserializationContext context) throws IOException {
+			JsonToken token = parser.currentToken();
+			if (token == JsonToken.START_ARRAY) {
+				throw new IllegalArgumentException("input takes a text or a map of names to texts, not a list");
+			}
+			if (token != JsonToken.START_OBJECT) {
+				return parser.getText();
+			}
+			Map<String, String> texts = new LinkedHashMap<>();
+			while (parser.nextToken() == JsonToken.FIELD_NAME) {
+				String key = parser.currentName();
+				JsonToken value = parser.nextToken();
+				if (value == JsonToken.VALUE_NULL) {
+					throw new IllegalArgumentException("input '" + key + "' has no value; write '' for an empty text");
+				}
+				if (value == JsonToken.START_OBJECT || value == JsonToken.START_ARRAY) {
+					throw new IllegalArgumentException("input '" + key + "' must be a single text, not " + (value == JsonToken.START_OBJECT ? "a map" : "a list"));
+				}
+				texts.put(key, parser.getText());
+			}
+			return Collections.unmodifiableMap(texts);
+		}
+	}
+
+	/** Reads {@code include} as a YAML list of files or as comma-separated text. */
+	public static class IncludeDeserializer extends JsonDeserializer<String> {
+		@Override
+		public String deserialize(JsonParser parser, DeserializationContext context) throws IOException {
+			JsonNode node = parser.getCodec().readTree(parser);
+			if (node.isArray()) {
+				List<String> files = new ArrayList<>();
+				node.forEach(file -> files.add(file.asText().trim()));
+				return String.join(",", files);
+			}
+			if (node.isValueNode()) {
+				return node.asText();
+			}
+			throw new IllegalArgumentException("include must be a file, a list of files, or comma-separated files");
 		}
 	}
 
 	@Data
 	public static class StateNode {
-		@JacksonXmlProperty(isAttribute = true)
 		String name;
-
-		@JacksonXmlElementWrapper(useWrapping = false)
-		@JacksonXmlProperty(localName = "Transition")
-		List<TransitionNode> transitions;
-
-		@JacksonXmlElementWrapper(useWrapping = false)
-		@JacksonXmlProperty(localName = "Call")
+		List<TransitionNode> steps;
+		/** Steps with {@code runStage}; they are written in {@code steps} and separated here. */
+		@JsonIgnore
+		@Setter(AccessLevel.NONE)
 		List<CallNode> calls;
-
-		@JacksonXmlElementWrapper(useWrapping = false)
-		@JacksonXmlProperty(localName = "Return")
 		List<ReturnNode> returns;
 
-		public List<TransitionNode> getTransitions() {
-			if (transitions == null) {
-				transitions = new ArrayList<TransitionNode>();
+		public List<TransitionNode> getSteps() {
+			if (steps == null) {
+				steps = new ArrayList<TransitionNode>();
 			}
-			return transitions;
+			return steps;
 		}
 
-		public void setTransitions(List<TransitionNode> value) {
-			if (transitions == null) {
-				transitions = new ArrayList<TransitionNode>(value.size());
+		/** Reads {@code steps}: an entry with {@code runStage} is a call, every other entry an ordinary step. */
+		public void setSteps(List<TransitionNode> value) {
+			for (TransitionNode node : value) {
+				if (node.runStage == null) {
+					getSteps().add(node);
+				} else if (node.nextStage != null) {
+					throw new IllegalArgumentException("step '" + node.step + "' has both runStage and nextStage; a step that runs a stage names it with runStage only");
+				} else {
+					getCalls().add(CallNode.of(node));
+				}
 			}
-			transitions.addAll(value);
 		}
 
-		public void setCalls(List<CallNode> value) {
-			if (calls == null) {
-				calls = new ArrayList<CallNode>(value.size());
-			}
-			calls.addAll(value);
+		/** The {@code calls} key was merged into {@code steps}. */
+		@JsonSetter("calls")
+		void rejectCallsKey(Object ignored) {
+			throw new IllegalArgumentException("'calls' was merged into 'steps': write each call as a step with runStage: <stage>");
 		}
 
 		public void setReturns(List<ReturnNode> value) {
-			if (returns == null) {
-				returns = new ArrayList<ReturnNode>(value.size());
+			for (ReturnNode node : value) {
+				if (node.runStage != null) {
+					throw new IllegalArgumentException("returns entry '" + node.step + "' cannot have runStage");
+				}
+				getReturns().add(node);
 			}
-			returns.addAll(value);
 		}
 
 		@JsonIgnore
 		public List<TransitionNode> getTransitionsForIterator() {
 			List<TransitionNode> returns = new ArrayList<TransitionNode>();
-			returns.addAll(getTransitions());
+			returns.addAll(getSteps());
 			returns.addAll(getCalls());
 			returns.addAll(getReturns());
 			return returns;
@@ -137,62 +212,63 @@ public interface ConfigReader {
 
 	@Data
 	public static class TransitionNode {
-		@JacksonXmlProperty(isAttribute = true)
-		String when;
-
-		@JacksonXmlProperty(isAttribute = true)
-		String to;
-
-		@JacksonXmlProperty(isAttribute = true)
-		String fire;
-
-		@JacksonXmlProperty(isAttribute = true)
-		String stmevent;
-		
-
-		@JacksonXmlProperty(localName = "Actor")
-		ActorNode actor;
-
-		@JacksonXmlProperty(localName = "Condition")
-		ConditionNode condition;
-
-
-		@JacksonXmlProperty(localName = "OnFailedCondition")
-		ConditionFailedNode onFailedCondition;
-
-		@JacksonXmlProperty(localName = "OnError")
+		String step;
+		String nextStage;
+		/** On an entry in {@code steps}: makes it a call that runs this stage as a sub-flow. */
+		String runStage;
+		String then;
+		String control;
+		ActorNode action;
+		ConditionNode check;
+		ConditionFailedNode onFalse;
 		ErrorNode onError;
-
-		@JacksonXmlElementWrapper(useWrapping = false)
-		@JacksonXmlProperty(localName = "Case")
-		List<CaseNode> cases;
+		@Setter(AccessLevel.NONE)
+		List<CaseNode> outcomes;
 
 		@JsonIgnore
 		String fileName;
 
+		/** One entry per result; the catch-all is written as {@code otherwise}. */
+		public void setOutcomes(List<CaseNode> value) {
+			for (CaseNode outcome : value) {
+				if (CaseNode.DEFAULT.equals(outcome.when)) {
+					throw new IllegalArgumentException("step '" + step + "': write the catch-all outcome as otherwise: { nextStage, then } instead of when: default");
+				}
+			}
+			outcomeList().addAll(0, value);
+		}
+
+		/** {@code otherwise}: where to go when no outcome matches the result. */
+		@JsonSetter("otherwise")
+		void setOtherwise(OtherwiseNode otherwise) {
+			if (otherwise == null) {
+				return;
+			}
+			CaseNode catchAll = new CaseNode();
+			catchAll.when = CaseNode.DEFAULT;
+			catchAll.nextStage = otherwise.nextStage;
+			catchAll.then = otherwise.then;
+			outcomeList().add(catchAll);
+		}
+
+		private List<CaseNode> outcomeList() {
+			if (outcomes == null) {
+				outcomes = new ArrayList<CaseNode>();
+			}
+			return outcomes;
+		}
+
 		@JsonIgnore
-		public List<CaseNode> getCasesForIteration() {
-			if (cases == null) {
+		public List<CaseNode> getOutcomesForIteration() {
+			if (outcomes == null) {
 				return new ArrayList<CaseNode>();
 			}
-			return cases;
+			return outcomes;
 		}
 
 		@Override
 		public String toString() {
-			StringBuilder builder = new StringBuilder();
-			builder.append("<transition ");
-			builder.append("' when='");
-			builder.append(when);
-			builder.append("' to='");
-			builder.append(to);
-
-			builder.append("' fire='");
-			builder.append(fire);
-			builder.append("' stmevent='");
-			builder.append(stmevent);
-			builder.append("'/>");
-			return builder.toString();
+			return "{ step: " + step + ", nextStage: " + nextStage + ", then: " + then + ", control: " + control + " }";
 		}
 
 		public String getFileName() {
@@ -209,61 +285,89 @@ public interface ConfigReader {
 	@EqualsAndHashCode(callSuper = false)
 	public static class CallNode extends TransitionNode {
 
+		@Override
+		public String toString() {
+			return super.toString().replace("nextStage:", "runStage:");
+		}
+
+		/** A call read from a {@code steps} entry with {@code runStage}. */
+		static CallNode of(TransitionNode rule) {
+			CallNode call = new CallNode();
+			call.step = rule.step;
+			call.nextStage = rule.runStage;
+			call.runStage = rule.runStage;
+			call.then = rule.then;
+			call.control = rule.control;
+			call.action = rule.action;
+			call.check = rule.check;
+			call.onFalse = rule.onFalse;
+			call.onError = rule.onError;
+			call.outcomes = rule.outcomes;
+			call.fileName = rule.fileName;
+			return call;
+		}
 	}
 
 	@Data
 	@EqualsAndHashCode(callSuper = false)
 	public static class ReturnNode extends TransitionNode {
 
+		@Override
+		public String toString() {
+			return super.toString();
+		}
+
 	}
 
 	@Data
 	public static class CaseNode {
-		@JacksonXmlProperty(isAttribute = true)
+		/** The internal {@code when} of the {@code otherwise} outcome. */
+		static final String DEFAULT = "default";
+
 		String when;
+		String nextStage;
+		String then;
+	}
 
-		@JacksonXmlProperty(isAttribute = true)
-		String to;
-
-		@JacksonXmlProperty(isAttribute = true)
-		String fire;
+	/** {@code otherwise: { nextStage, then }} on a step. */
+	@Data
+	public static class OtherwiseNode {
+		String nextStage;
+		String then;
 	}
 
 	@Data
 	public static class ActorNode {
-		@JacksonXmlProperty(isAttribute = true)
 		String beanName;
-
-		@JacksonXmlProperty(isAttribute = true)
+		@JsonProperty("class")
 		String className;
-
-		@JacksonXmlProperty(isAttribute = true)
-		String methodName;
-
-		@JacksonXmlProperty(isAttribute = true)
+		String method;
 		String beanType;
-
-		@JacksonXmlProperty(isAttribute = true)
 		String lookupMethod;
-		
-		@JacksonXmlProperty(isAttribute = true)
 		String lookupBeanType;
-
-		@JacksonXmlProperty(isAttribute = true)
 		String register = "true";
-
-		@JacksonXmlProperty(isAttribute = true)
 		String scope;
-
-		@JacksonXmlElementWrapper(useWrapping = false)
-		@JacksonXmlProperty(localName = "Property")
 		List<ParameterNode> properties;
 
 		@JsonIgnore
 		String formattedBeanName;
+		/** {@code input} written as text: the method is called as {@code method(ctx, String)}. */
+		String input;
 
-		@JacksonXmlProperty(isAttribute = true)
-		public String argParameter;
+		/** {@code input} written as a map: the method is called as {@code method(ctx, Map<String, String>)}. */
+		@JsonIgnore
+		Map<String, String> inputMap;
+
+		/** {@code input}: a text, or a map of names to texts (see {@link InputDeserializer}). */
+		@JsonDeserialize(using = InputDeserializer.class)
+		@SuppressWarnings("unchecked")
+		public void setInput(Object value) {
+			if (value instanceof Map<?, ?> map) {
+				inputMap = (Map<String, String>) map;
+			} else if (value != null) {
+				input = value.toString();
+			}
+		}
 
 
 
@@ -288,38 +392,29 @@ public interface ConfigReader {
 
 	@Data
 	public static class ParameterNode {
-		@JacksonXmlProperty(isAttribute = true)
 		String name;
-
-		@JacksonXmlProperty(isAttribute = true)
 		String value;
 	}
 
 	@Data
 	public static class ConditionFailedNode {
-		@JacksonXmlProperty(isAttribute = true)
-		String to;
-
-		@JacksonXmlProperty(isAttribute = true)
-		String fire;
+		String nextStage;
+		String then;
 
 		@Override
 		public String toString() {
-			return "<onFailedCondition to='" + to + "' fire='" + fire + "'/>";
+			return "onFalse: { nextStage: " + nextStage + ", then: " + then + " }";
 		}
 	}
 
 	@Data
 	public static class ErrorNode {
-		@JacksonXmlProperty(isAttribute = true)
-		String to;
-
-		@JacksonXmlProperty(isAttribute = true)
-		String fire;
+		String nextStage;
+		String then;
 
 		@Override
 		public String toString() {
-			return "<onError to='" + to + "' fire='" + fire + "'/>";
+			return "onError: { nextStage: " + nextStage + ", then: " + then + " }";
 		}
 	}
 

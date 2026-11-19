@@ -4,7 +4,7 @@ import com.easysoft.stm.STM.STMEvent;
 
 /**
  * A transition with a condition and no actor. The condition's result is stored as the last
- * result; {@code false} goes to the {@code OnFailedCondition} transition.
+ * result; {@code false} goes to the {@code onFalse} transition.
  */
 public class ConditionOnly extends ConditionAndActor {
 

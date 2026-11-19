@@ -3,7 +3,7 @@ package com.easysoft.stm;
 import com.easysoft.stm.STM.STMEvent;
 
 /**
- * A transition with an explicit {@code stmevent}: it always reports its configured
+ * A transition with an explicit {@code control}: it always reports its configured
  * {@link STMEvent}, ignoring changes the actor makes through the context.
  */
 public class StmEventBasedTransition extends Transition {

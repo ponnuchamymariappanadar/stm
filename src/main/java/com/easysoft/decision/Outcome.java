@@ -25,7 +25,7 @@ import com.easysoft.stm.STMContext;
  * </pre>
  *
  * Without a {@code default}, no match gives {@code null}. As an {@link Actor} the result becomes the
- * flow's last result, so a transition's {@code cases} can route on it; from flow configuration use
+ * flow's last result, so a step's {@code outcomes} in the flow can route on it; from flow configuration use
  * {@link DecisionActor#decide(STMContext, String)}.
  */
 public final class Outcome implements Actor<STMContext> {

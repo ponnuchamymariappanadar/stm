@@ -3,7 +3,7 @@ package com.easysoft.stm;
 /**
  * A state machine: a set of {@link State}s whose {@link Transition}s are selected by {@link Event}s.
  * <p>
- * {@link STMStateful} is the implementation. Machines are usually built from XML/YAML with
+ * {@link STMStateful} is the implementation. Machines are usually built from YAML with
  * {@code STMOptimizedBuilder} and are immutable and reusable; per-run state lives in a
  * {@link StatefulContext}.
  *

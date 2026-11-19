@@ -3,8 +3,8 @@ package com.easysoft.stm;
 import java.util.Collection;
 
 /**
- * Defined on the "name" attribute of  <State> or "to" attribute of  <Transition > or "to" attribute of <Case> or "to" attribute of <onFailedCondition>
- * or "to" attribute of <OnError>
+ * Defined by a stage's {@code name}, or by {@code nextStage} on a step, an outcome, {@code onFalse} or
+ * {@code onError}.
  * @author Ponnuchamy Mariappanadar
  */
 public class State extends Common {
@@ -40,4 +40,4 @@ public class State extends Common {
 		return transitions.transitionMap.values();
 	}
 }
-;
+;

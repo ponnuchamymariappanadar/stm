@@ -18,7 +18,7 @@ import com.easysoft.stm.STM.STMEvent;
 
 /**
  * Tests for the execution loop in {@link STMStateful} and the public API of
- * {@link StatefulContext}, using a machine built by hand (no XML).
+ * {@link StatefulContext}, using a machine built by hand (no YAML).
  *
  * <pre>
  *   a --start--> (step1) --> a --middle--> (step2) --> b --finish--> (step3, STOP)

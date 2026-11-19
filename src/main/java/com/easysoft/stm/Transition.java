@@ -8,7 +8,7 @@ import com.easysoft.stm.STM.STMEvent;
 
 /**
  * One step of a flow: <em>in {@code fromState}, when {@code fromEvent}</em>, run the actor, then
- * continue with {@code fire} ({@code toEvent}) in {@code to} ({@code toState}).
+ * continue with {@code then} ({@code toEvent}) in {@code nextStage} ({@code toState}).
  * <p>
  * Subclasses: {@link PlaceHolderTransition} (no actor), {@link ConditionOnly},
  * {@link ConditionAndActor} and {@link StmEventBasedTransition}. Exceptions thrown by the actor
@@ -169,6 +169,8 @@ public class Transition {
 			logger = LoggerFactory.getLogger(((MethodWithLookupArg) actor).getActualActor().getClass());
 		} else if (actor instanceof MethodWithStringArg) {
 			logger = LoggerFactory.getLogger(((MethodWithStringArg) actor).getActualActor().getClass());
+		} else if (actor instanceof MethodWithMapArg) {
+			logger = LoggerFactory.getLogger(((MethodWithMapArg) actor).getActualActor().getClass());
 		}else if (actor instanceof Choice) {
 			logger = LoggerFactory.getLogger(((Choice<?>) actor).getActualActor().getClass());
 		} 

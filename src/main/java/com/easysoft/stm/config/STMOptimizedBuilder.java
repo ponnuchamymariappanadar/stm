@@ -40,6 +40,7 @@ import com.easysoft.stm.Event;
 import com.easysoft.stm.EventCollection;
 import com.easysoft.stm.MethodActor;
 import com.easysoft.stm.MethodWithLookupArg;
+import com.easysoft.stm.MethodWithMapArg;
 import com.easysoft.stm.MethodWithStringArg;
 import com.easysoft.stm.PlaceHolderTransition;
 import com.easysoft.stm.STMContext;
@@ -69,16 +70,16 @@ import com.easysoft.stm.config.ConfigReader.StateNode;
 import com.easysoft.stm.config.ConfigReader.TransitionNode;
 
 /**
- * Builds an {@link STMStateful} from one or more XML/YAML configuration files.
+ * Builds an {@link STMStateful} from one or more YAML flow files.
  * <p>
- * The builder fills in defaults ({@code to} omitted means the current state; {@code to} and
- * {@code fire} both omitted means a terminal transition), binds actor methods with
+ * The builder fills in defaults ({@code nextStage} omitted means the current stage;
+ * {@code nextStage} and {@code then} both omitted means a terminal step), binds actor methods with
  * {@code LambdaMetafactory}, validates the whole graph, and collapses chains of placeholder
  * transitions.
  *
  * <pre>{@code
  * STMOptimizedBuilder<STMContext> builder = new STMOptimizedBuilder<>(null, false);
- * builder.addFile("classpath:stm/order-flow.xml");
+ * builder.addFile("classpath:stm/order-flow.yaml");
  * STMStateful<STMContext> stm = builder.build();
  * }</pre>
  *
@@ -177,9 +178,9 @@ public class STMOptimizedBuilder<T extends STMContext> {
 		}
 		resolvePlaceHolderProperty(stm);
 
-		if (StringUtils.isNotBlank(stm.getStmFiles())) {
+		if (StringUtils.isNotBlank(stm.getInclude())) {
 			logger.info("STM loading the file {}", fileName);
-			for (String file : stm.getStmFiles().split(",")) {
+			for (String file : stm.getInclude().split(",")) {
 				try {
 					addFile(file.trim());
 				} catch (Exception e) {
@@ -212,11 +213,10 @@ public class STMOptimizedBuilder<T extends STMContext> {
 	}
 
 	public STMOptimizedBuilder<T> addFile(String configFile) throws Exception {
-		String configData = readContent(configFile);
-		if (configFile.endsWith("yml") || configFile.endsWith("yaml")) {
-			return add(new ConfigYAMLReader(), configData, configFile);
+		if (!configFile.endsWith(".yml") && !configFile.endsWith(".yaml")) {
+			throw new STMException("only YAML flow files (.yaml or .yml) are supported: " + configFile);
 		}
-		return add(new ConfigXMLReader(), configData, configFile);
+		return add(new ConfigYAMLReader(), readContent(configFile), configFile);
 	}
 
 	public static String readContent(String configFile) throws IOException, Exception {
@@ -277,13 +277,13 @@ public class STMOptimizedBuilder<T extends STMContext> {
 
 	void resolvePlaceHolderProperty(STMRoot stm) {
 
-		for (StateNode stateNode : stm.getStates()) {
+		for (StateNode stateNode : stm.getStages()) {
 			stateNode.name = resolvePlaceHolderProperty(stateNode.name);
 			for (TransitionNode transitionNode : stateNode.getTransitionsForIterator()) {
-				transitionNode.fire = resolvePlaceHolderProperty(transitionNode.fire);
-				transitionNode.to = resolvePlaceHolderProperty(transitionNode.to);
-				transitionNode.when = resolvePlaceHolderProperty(transitionNode.when);
-				transitionNode.stmevent = resolvePlaceHolderProperty(transitionNode.stmevent);
+				transitionNode.then = resolvePlaceHolderProperty(transitionNode.then);
+				transitionNode.nextStage = resolvePlaceHolderProperty(transitionNode.nextStage);
+				transitionNode.step = resolvePlaceHolderProperty(transitionNode.step);
+				transitionNode.control = resolvePlaceHolderProperty(transitionNode.control);
 				resolveActorNode(stateNode, transitionNode);
 				resolveCondition(stateNode, transitionNode);
 				resolveOnErrorNode(transitionNode);
@@ -296,73 +296,73 @@ public class STMOptimizedBuilder<T extends STMContext> {
 	}
 
 	private void resolveStmProperty(STMRoot stm) {
-		stm.fire = resolvePlaceHolderProperty(stm.fire);
+		stm.startStep = resolvePlaceHolderProperty(stm.startStep);
 		stm.name = resolvePlaceHolderProperty(stm.name);
-		stm.start = resolvePlaceHolderProperty(stm.start);
+		stm.startStage = resolvePlaceHolderProperty(stm.startStage);
 		if (stm.onError != null) {
-			stm.onError.fire = resolvePlaceHolderProperty(stm.onError.fire);
-			stm.onError.to = resolvePlaceHolderProperty(stm.onError.to);
+			stm.onError.then = resolvePlaceHolderProperty(stm.onError.then);
+			stm.onError.nextStage = resolvePlaceHolderProperty(stm.onError.nextStage);
 		}
 
-		if (stm.onFailedCondition != null) {
-			stm.onFailedCondition.fire = resolvePlaceHolderProperty(stm.onFailedCondition.fire);
-			stm.onFailedCondition.to = resolvePlaceHolderProperty(stm.onFailedCondition.to);
+		if (stm.onFalse != null) {
+			stm.onFalse.then = resolvePlaceHolderProperty(stm.onFalse.then);
+			stm.onFalse.nextStage = resolvePlaceHolderProperty(stm.onFalse.nextStage);
 		}
 	}
 
 	private void resolveCasesNode(TransitionNode transitionNode) {
-		if (transitionNode.cases != null && !transitionNode.cases.isEmpty()) {
-			for (CaseNode node : transitionNode.cases) {
-				node.fire = resolvePlaceHolderProperty(node.fire);
-				node.to = resolvePlaceHolderProperty(node.to);
+		if (transitionNode.outcomes != null && !transitionNode.outcomes.isEmpty()) {
+			for (CaseNode node : transitionNode.outcomes) {
+				node.then = resolvePlaceHolderProperty(node.then);
+				node.nextStage = resolvePlaceHolderProperty(node.nextStage);
 				node.when = resolvePlaceHolderProperty(node.when);
 			}
 		}
 	}
 
 	private void resolveOnFailedConditionNode(TransitionNode transitionNode) {
-		if (transitionNode.onFailedCondition != null) {
-			transitionNode.onFailedCondition.fire = resolvePlaceHolderProperty(transitionNode.onFailedCondition.fire);
-			transitionNode.onFailedCondition.to = resolvePlaceHolderProperty(transitionNode.onFailedCondition.to);
+		if (transitionNode.onFalse != null) {
+			transitionNode.onFalse.then = resolvePlaceHolderProperty(transitionNode.onFalse.then);
+			transitionNode.onFalse.nextStage = resolvePlaceHolderProperty(transitionNode.onFalse.nextStage);
 		}
 	}
 
 	private void resolveOnErrorNode(TransitionNode transitionNode) {
 		if (transitionNode.onError != null) {
-			transitionNode.onError.fire = resolvePlaceHolderProperty(transitionNode.onError.fire);
-			transitionNode.onError.to = resolvePlaceHolderProperty(transitionNode.onError.to);
+			transitionNode.onError.then = resolvePlaceHolderProperty(transitionNode.onError.then);
+			transitionNode.onError.nextStage = resolvePlaceHolderProperty(transitionNode.onError.nextStage);
 		}
 	}
 
 	private void resolveCondition(StateNode stateNode, TransitionNode transitionNode) {
-		if (transitionNode.condition != null) {
-			transitionNode.condition.beanName = resolvePlaceHolderProperty(transitionNode.condition.beanName);
-			transitionNode.condition.beanType = resolvePlaceHolderProperty(transitionNode.condition.beanType);
-			transitionNode.condition.className = resolvePlaceHolderProperty(transitionNode.condition.className);
-			transitionNode.condition.methodName = resolvePlaceHolderProperty(transitionNode.condition.methodName);
-			if (transitionNode.condition.beanType != null && (transitionNode.condition.register == null || "true".equals(transitionNode.condition.register))) {
-				Map<String, String> parameters = transitionNode.condition.getParametesForIteration();
-				transitionNode.condition.formattedBeanName = addParameter(stateNode, transitionNode, parameters, transitionNode.condition.beanType, transitionNode.condition.scope);
+		if (transitionNode.check != null) {
+			transitionNode.check.beanName = resolvePlaceHolderProperty(transitionNode.check.beanName);
+			transitionNode.check.beanType = resolvePlaceHolderProperty(transitionNode.check.beanType);
+			transitionNode.check.className = resolvePlaceHolderProperty(transitionNode.check.className);
+			transitionNode.check.method = resolvePlaceHolderProperty(transitionNode.check.method);
+			if (transitionNode.check.beanType != null && (transitionNode.check.register == null || "true".equals(transitionNode.check.register))) {
+				Map<String, String> parameters = transitionNode.check.getParametesForIteration();
+				transitionNode.check.formattedBeanName = addParameter(stateNode, transitionNode, parameters, transitionNode.check.beanType, transitionNode.check.scope);
 			}
 		}
 	}
 
 	private void resolveActorNode(StateNode stateNode, TransitionNode transitionNode) {
-		if (transitionNode.actor != null) {
-			transitionNode.actor.beanName = resolvePlaceHolderProperty(transitionNode.actor.beanName);
-			transitionNode.actor.beanType = resolvePlaceHolderProperty(transitionNode.actor.beanType);
-			transitionNode.actor.className = resolvePlaceHolderProperty(transitionNode.actor.className);
-			transitionNode.actor.methodName = resolvePlaceHolderProperty(transitionNode.actor.methodName);
-			if (transitionNode.actor.beanType != null && (transitionNode.actor.register == null || "true".equals(transitionNode.actor.register))) {
-				Map<String, String> parameters = transitionNode.actor.getParametesForIteration();
-				transitionNode.actor.formattedBeanName = addParameter(stateNode, transitionNode, parameters, transitionNode.actor.beanType, transitionNode.actor.scope);
+		if (transitionNode.action != null) {
+			transitionNode.action.beanName = resolvePlaceHolderProperty(transitionNode.action.beanName);
+			transitionNode.action.beanType = resolvePlaceHolderProperty(transitionNode.action.beanType);
+			transitionNode.action.className = resolvePlaceHolderProperty(transitionNode.action.className);
+			transitionNode.action.method = resolvePlaceHolderProperty(transitionNode.action.method);
+			if (transitionNode.action.beanType != null && (transitionNode.action.register == null || "true".equals(transitionNode.action.register))) {
+				Map<String, String> parameters = transitionNode.action.getParametesForIteration();
+				transitionNode.action.formattedBeanName = addParameter(stateNode, transitionNode, parameters, transitionNode.action.beanType, transitionNode.action.scope);
 			}
 		}
 	}
 
 	private String addParameter(StateNode stateNode, TransitionNode transitionNode, Map<String, String> parameters, String beanType, String scope) {
 		String beanRegistrationKey = beanType;
-		String definitionPoint = createBeanName(stateNode.name, transitionNode.when);
+		String definitionPoint = createBeanName(stateNode.name, transitionNode.step);
 		if (parameters.size() > 0) {
 			beanRegistrationKey = definitionPoint;
 			StringBuilder parameterKey = new StringBuilder();
@@ -430,11 +430,11 @@ public class STMOptimizedBuilder<T extends STMContext> {
 			globalError = stm.onError;
 		}
 		if (globalFailedCondition == null) {
-			globalFailedCondition = stm.onFailedCondition;
+			globalFailedCondition = stm.onFalse;
 		}
 
 		// populate the transition, handler and condition
-		for (StateNode stateNode : stm.getStates()) {
+		for (StateNode stateNode : stm.getStages()) {
 			if (StringUtils.isAllBlank(stateNode.name)) {
 				String msg = "State name " + stateNode.name + " cannot be null";
 				logger.info(msg);
@@ -460,19 +460,19 @@ public class STMOptimizedBuilder<T extends STMContext> {
 				validateTransitionNodeToAndFire(stm, stateNode, transitionNode);
 				validateTransitionNodeToAndFire2(stm, stateNode, transitionNode);
 				changeTransitionNodeToThis(stm, stateNode, transitionNode);
-				Event fromEvent = createEvent(events, transitionNode.when);
+				Event fromEvent = createEvent(events, transitionNode.step);
 				if (defaultEvent == null) {
 					defaultEvent = fromEvent;
 				}
 				changeTransitionNodeToAndFire(stm, stateNode, fromState, transitionNode);
-				State toState = createState(states, transitionNode.to);
-				Event toEvent = createEvent(events, transitionNode.fire);
+				State toState = createState(states, transitionNode.nextStage);
+				Event toEvent = createEvent(events, transitionNode.then);
 				createTransition(states, events, fromState, transitionNode, fromEvent, toState, toEvent);
 				if (globalError == null) {
 					globalError = stm.onError;
 				}
 				if (globalFailedCondition == null) {
-					globalFailedCondition = stm.onFailedCondition;
+					globalFailedCondition = stm.onFalse;
 				}
 			}
 		}
@@ -482,8 +482,8 @@ public class STMOptimizedBuilder<T extends STMContext> {
 	private void validateTransitionUniqueness(STMRoot stm, StateNode stateNode) {
 		Set<String> transitionWhen = new HashSet<String>();
 		for (TransitionNode transitionNode : stateNode.getTransitionsForIterator()) {
-			if (!transitionWhen.add(transitionNode.when)) {
-				String msg = stm.fileName + " - transiton is duplicated in the same state " + stateNode.name + " when=" + transitionNode.when;
+			if (!transitionWhen.add(transitionNode.step)) {
+				String msg = stm.fileName + " - transiton is duplicated in the same state " + stateNode.name + " step=" + transitionNode.step;
 				logger.info(msg);
 				throw new STMException(msg);
 			}
@@ -492,9 +492,9 @@ public class STMOptimizedBuilder<T extends STMContext> {
 
 	private void populateDefaultStateAndEvent(STMRoot stm) {
 		if (!defaultPopulated) {
-			if (stm.start != null && stm.fire != null) {
-				defaultState = states.getState(stm.start);
-				defaultEvent = events.getEvent(stm.fire);
+			if (stm.startStage != null && stm.startStep != null) {
+				defaultState = states.getState(stm.startStage);
+				defaultEvent = events.getEvent(stm.startStep);
 				defaultPopulated = true;
 				name = stm.name;
 			}
@@ -504,54 +504,54 @@ public class STMOptimizedBuilder<T extends STMContext> {
 	private void changeTransitionNodeToAndFire(STMRoot stm, StateNode stateNode, State fromState, TransitionNode transitionNode) {
 		// if no to state, then create one to state from current state
 		// name and id and -end-state, for event create -end-when
-		if (transitionNode.to == null && transitionNode.fire == null) {
-			transitionNode.to = stateNode.name + "-" + fromState.getId() + "-end-state";
-			transitionNode.fire = stateNode.name + "-" + fromState.getId() + "-end-when";
-			transitionNode.stmevent = DEFAULT_FOR_TO_NOT_DEFINED_STM_EVENT;
+		if (transitionNode.nextStage == null && transitionNode.then == null) {
+			transitionNode.nextStage = stateNode.name + "-" + fromState.getId() + "-end-state";
+			transitionNode.then = stateNode.name + "-" + fromState.getId() + "-end-when";
+			transitionNode.control = DEFAULT_FOR_TO_NOT_DEFINED_STM_EVENT;
 			if (debug) {
-				logger.info(stm.fileName + " - Transition <to> and <fire> missing, so generated for "
-						+ Transition.formatTranstion(stateNode.name, transitionNode.when, transitionNode.to, transitionNode.fire, STMEvent.STOP));
+				logger.info(stm.fileName + " - Transition nextStage and then missing, so generated for "
+						+ Transition.formatTranstion(stateNode.name, transitionNode.step, transitionNode.nextStage, transitionNode.then, STMEvent.STOP));
 			}
 		}
 	}
 
 	private void changeTransitionNodeToThis(STMRoot stm, StateNode stateNode, TransitionNode transitionNode) {
 		// if transition node to is this, then put to as current state
-		if ("this".equalsIgnoreCase(transitionNode.to)) {
-			String msg = stm.fileName + " - Transition <to=this>, so assuming the current to state as current state "
-					+ Transition.formatTranstion(stateNode.name, transitionNode.when, transitionNode.to, transitionNode.fire, STMEvent.NEXT);
+		if ("this".equalsIgnoreCase(transitionNode.nextStage)) {
+			String msg = stm.fileName + " - Transition nextStage: this, so assuming the current to state as current state "
+					+ Transition.formatTranstion(stateNode.name, transitionNode.step, transitionNode.nextStage, transitionNode.then, STMEvent.NEXT);
 
 			if (debug) {
 				logger.info(msg);
 			}
-			transitionNode.to = stateNode.name;
+			transitionNode.nextStage = stateNode.name;
 		}
 	}
 
 	private void validateTransitionNodeToAndFire2(STMRoot stm, StateNode stateNode, TransitionNode transitionNode) {
-		if (transitionNode.to != null && transitionNode.fire == null) {
-			String msg = stm.fileName + " - Transition with both <fire><to> should be defined  "
-					+ Transition.formatTranstion(stateNode.name, transitionNode.when, transitionNode.to, transitionNode.fire, STMEvent.STOP);
+		if (transitionNode.nextStage != null && transitionNode.then == null) {
+			String msg = stm.fileName + " - Transition with both then and nextStage should be defined  "
+					+ Transition.formatTranstion(stateNode.name, transitionNode.step, transitionNode.nextStage, transitionNode.then, STMEvent.STOP);
 			logger.info(msg);
 			throw new STMException(msg);
 		}
 	}
 
 	private void validateTransitionNodeToAndFire(STMRoot stm, StateNode stateNode, TransitionNode transitionNode) {
-		if (transitionNode.to == null && transitionNode.fire != null) {
-			String msg = stm.fileName + " - Transition <to=null&&fire!= null>, so assuming the current to state as current state "
-					+ Transition.formatTranstion(stateNode.name, transitionNode.when, transitionNode.to, transitionNode.fire, STMEvent.NEXT);
+		if (transitionNode.nextStage == null && transitionNode.then != null) {
+			String msg = stm.fileName + " - Transition without nextStage but with then, so assuming the current to state as current state "
+					+ Transition.formatTranstion(stateNode.name, transitionNode.step, transitionNode.nextStage, transitionNode.then, STMEvent.NEXT);
 			if (debug) {
 				logger.info(msg);
 			}
-			transitionNode.to = stateNode.name;
+			transitionNode.nextStage = stateNode.name;
 		}
 	}
 
 	private void validateTransitionNodeWhen(STMRoot stm, StateNode stateNode, TransitionNode transitionNode) {
-		if (transitionNode.when == null) {
-			String msg = stm.fileName + " - Transition <when> missing for "
-					+ Transition.formatTranstion(stateNode.name, transitionNode.when, transitionNode.to, transitionNode.fire, STMEvent.STOP);
+		if (transitionNode.step == null) {
+			String msg = stm.fileName + " - Transition step missing for "
+					+ Transition.formatTranstion(stateNode.name, transitionNode.step, transitionNode.nextStage, transitionNode.then, STMEvent.STOP);
 			logger.info(msg);
 			throw new STMException(msg);
 		}
@@ -791,19 +791,19 @@ public class STMOptimizedBuilder<T extends STMContext> {
 		if (stmScopedError == null) {
 			stmScopedError = this.globalError;
 		}
-		ConditionFailedNode stmScopedOnConditionFailed = stmRoot.onFailedCondition;
+		ConditionFailedNode stmScopedOnConditionFailed = stmRoot.onFalse;
 		if (stmScopedOnConditionFailed == null) {
 			stmScopedOnConditionFailed = this.globalFailedCondition;
 		}
 		// Iteration to populate error and onFailedCondition
 		// populate the transition, handler and condition
-		for (StateNode stateNode : stmRoot.getStates()) {
+		for (StateNode stateNode : stmRoot.getStages()) {
 			State fromState = states.getState(stateNode.name);
 			for (TransitionNode transitionNode : stateNode.getTransitionsForIterator()) {
-				Event fromEvent = events.getEvent(transitionNode.when);
-				State toState = states.getState(transitionNode.to);
+				Event fromEvent = events.getEvent(transitionNode.step);
+				State toState = states.getState(transitionNode.nextStage);
 				if (fromEvent == null || toState == null) {
-					String msg = transitionNode.fileName + " -Missing <state> " + stateNode.name + " <when> " + transitionNode.when + " <to> " + transitionNode.to;
+					String msg = transitionNode.fileName + " -Missing stage " + stateNode.name + " step " + transitionNode.step + " nextStage " + transitionNode.nextStage;
 					logger.info(msg);
 					throw new STMException(msg);
 				}
@@ -819,43 +819,43 @@ public class STMOptimizedBuilder<T extends STMContext> {
 
 				if (transitionNode.onError == null) {
 					if (stmScopedError == null) {
-						String msg = stmRoot.fileName + " - Missing local <OnError> and global <OnError> " + currentTransition;
+						String msg = stmRoot.fileName + " - Missing onError on the step and under defaults " + currentTransition;
 						logger.info(msg);
 						throw new STMException(msg);
 					}
-					errorTransition = getErrorFailedConditionTransition(states, events, transitionNode, stmRoot.fileName, stateNode.name, errorMsg, stmScopedError.to,
-							stmScopedError.fire);
+					errorTransition = getErrorFailedConditionTransition(states, events, transitionNode, stmRoot.fileName, stateNode.name, errorMsg, stmScopedError.nextStage,
+							stmScopedError.then);
 				} else {
-					if ("this".equals(transitionNode.onError.to)) {
-						transitionNode.onError.to = stateNode.name;
+					if ("this".equals(transitionNode.onError.nextStage)) {
+						transitionNode.onError.nextStage = stateNode.name;
 					}
-					errorTransition = getErrorFailedConditionTransition(states, events, transitionNode, stmRoot.fileName, stateNode.name, errorMsg, transitionNode.onError.to,
-							transitionNode.onError.fire);
+					errorTransition = getErrorFailedConditionTransition(states, events, transitionNode, stmRoot.fileName, stateNode.name, errorMsg, transitionNode.onError.nextStage,
+							transitionNode.onError.then);
 				}
 				if (currentTransition == null) {
-					String msg = transitionNode.fileName + " transition is null <state> " + stateNode.name + " <when> " + transitionNode.when + " <to> " + transitionNode.to;
+					String msg = transitionNode.fileName + " transition is null stage " + stateNode.name + " step " + transitionNode.step + " nextStage " + transitionNode.nextStage;
 					logger.info(msg);
 					throw new STMException(msg);
 				}
 				currentTransition.setOnErrorTransition(errorTransition);
 				// if transition with Condition
 				if (currentTransition instanceof ConditionOnly || currentTransition instanceof ConditionAndActor) {
-					if (transitionNode.onFailedCondition == null) {
+					if (transitionNode.onFalse == null) {
 						if (stmScopedOnConditionFailed == null) {
-							String msg = stmRoot.fileName + " - Missing local <OnFailedCondition> and global <onFailedCondition> " + currentTransition;
+							String msg = stmRoot.fileName + " - Missing onFalse on the step and under defaults " + currentTransition;
 							logger.info(msg);
 							throw new STMException(msg);
 						}
-						onFailedCondition = getErrorFailedConditionTransition(states, events, transitionNode, stmRoot.fileName, stateNode.name, "onFailedCondition",
-								stmScopedOnConditionFailed.to, stmScopedOnConditionFailed.fire);
+						onFailedCondition = getErrorFailedConditionTransition(states, events, transitionNode, stmRoot.fileName, stateNode.name, "onFalse",
+								stmScopedOnConditionFailed.nextStage, stmScopedOnConditionFailed.then);
 					} else {
-						if ("this".equals(transitionNode.onFailedCondition.to)) {
-							transitionNode.onFailedCondition.to = stateNode.name;
+						if ("this".equals(transitionNode.onFalse.nextStage)) {
+							transitionNode.onFalse.nextStage = stateNode.name;
 						}
-						onFailedCondition = getErrorFailedConditionTransition(states, events, transitionNode, stmRoot.fileName, stateNode.name, "onFailedCondition",
-								transitionNode.onFailedCondition.to, transitionNode.onFailedCondition.fire);
+						onFailedCondition = getErrorFailedConditionTransition(states, events, transitionNode, stmRoot.fileName, stateNode.name, "onFalse",
+								transitionNode.onFalse.nextStage, transitionNode.onFalse.then);
 					}
-					if (transitionNode.condition != null && onFailedCondition == null) {
+					if (transitionNode.check != null && onFailedCondition == null) {
 						String msg = stmRoot.fileName + " - Missing onConditionFailed, so use the global condition failed also not defined for " + currentTransition;
 						logger.info(msg);
 						throw new STMException(msg);
@@ -867,33 +867,33 @@ public class STMOptimizedBuilder<T extends STMContext> {
 	}
 
 	void wrapSwitchHandle(STMRoot stm, StateCollection states, EventCollection events) {
-		for (StateNode stateNode : stm.getStates()) {
+		for (StateNode stateNode : stm.getStages()) {
 			State fromState = states.getState(stateNode.name);
 			for (TransitionNode transitionNode : stateNode.getTransitionsForIterator()) {
-				if (returnStates.contains(transitionNode.getTo())) {
-					if (!stateNode.name.equals(transitionNode.getTo())) {
+				if (returnStates.contains(transitionNode.getNextStage())) {
+					if (!stateNode.name.equals(transitionNode.getNextStage())) {
 						if (!(transitionNode instanceof CallNode) && !(transitionNode instanceof ReturnNode)) {
-							String msg = transitionNode.fileName + " - To State dont have any call or Return node state=" + stateNode.name + ",toState=" + transitionNode.getTo()
-									+ "," + transitionNode.getWhen();
+							String msg = transitionNode.fileName + " - To State dont have any runStage step or returns entry state=" + stateNode.name + ",toState=" + transitionNode.getNextStage()
+									+ "," + transitionNode.getStep();
 
 							logger.info(msg);
 							throw new STMException(msg);
 						}
 					}
 				}
-				if (transitionNode.getCasesForIteration().size() > 0) {
-					Event fromEvent = events.getEvent(transitionNode.when);
+				if (transitionNode.getOutcomesForIteration().size() > 0) {
+					Event fromEvent = events.getEvent(transitionNode.step);
 					if (transitionNode instanceof CallNode) {
-						fromEvent = events.getEvent(transitionNode.when + RESULT);
+						fromEvent = events.getEvent(transitionNode.step + RESULT);
 					}
 					Transition currentTransition = fromState.getTransition(fromEvent);
 					if (currentTransition instanceof PlaceHolderTransition) {
-						String msg = transitionNode.fileName + " - Transiton dont have handler, cases not allowed for place holder transition " + currentTransition;
+						String msg = transitionNode.fileName + " - Transiton dont have handler, outcomes not allowed for place holder transition " + currentTransition;
 						logger.info(msg);
 						throw new STMException(msg);
 					}
 					if (currentTransition instanceof ConditionOnly) {
-						String msg = transitionNode.fileName + " - Transiton contains have condition with out any handler, cases not allowed  transition " + currentTransition;
+						String msg = transitionNode.fileName + " - Transiton contains have condition with out any handler, outcomes not allowed  transition " + currentTransition;
 						logger.info(msg);
 						throw new STMException(msg);
 					}
@@ -905,34 +905,34 @@ public class STMOptimizedBuilder<T extends STMContext> {
 
 	void wrapSwitchHandlerIfAny(String fileName, String stateName, StateCollection states, EventCollection events, TransitionNode transitionNode, Transition normalTransition) {
 		HashMap<String, Transition> transitions = new HashMap<String, Transition>();
-		for (CaseNode casen : transitionNode.getCasesForIteration()) {
+		for (CaseNode casen : transitionNode.getOutcomesForIteration()) {
 			validateCaseWhenAndFire(fileName, casen);
-			if (casen.to == null) {
+			if (casen.nextStage == null) {
 				String msg = fileName + " " + casen.when
-						+ String.format(" - Case missing <from> for transition %s  -- %s", normalTransition.getFromState().getName(), normalTransition.getFromEvent().getName());
+						+ String.format(" - Outcome missing from for transition %s  -- %s", normalTransition.getFromState().getName(), normalTransition.getFromEvent().getName());
 				if (debug) {
 					logger.info(msg);
 				}
-				casen.to = stateName;
-			} else if ("this".equalsIgnoreCase(casen.to)) {
-				String msg = fileName + " - case to is this, so assuming the current to state as current state <state> as " + stateName;
+				casen.nextStage = stateName;
+			} else if ("this".equalsIgnoreCase(casen.nextStage)) {
+				String msg = fileName + " - outcome nextStage is this, so assuming the current stage as " + stateName;
 				if (debug) {
 					logger.info(msg);
 				}
-				casen.to = stateName;
+				casen.nextStage = stateName;
 			}
-			State toState = states.getState(casen.to);
-			Event toEvent = events.getEvent(casen.fire);
+			State toState = states.getState(casen.nextStage);
+			Event toEvent = events.getEvent(casen.then);
 			if (toEvent == null || toState == null) {
-				String msg = fileName + " - Missing <case> <when> " + casen.when + " <to> " + toState + " <fire> " + toEvent;
+				String msg = fileName + " - Missing outcome when " + casen.when + " nextStage " + toState + " then " + toEvent;
 				logger.info(msg);
-				msg = fileName + " - Missing <case> <when> " + casen.when + " <to> " + casen.to + " <fire> " + casen.fire;
+				msg = fileName + " - Missing outcome when " + casen.when + " nextStage " + casen.nextStage + " then " + casen.then;
 				logger.info(msg);
 				throw new STMException(msg);
 			}
 			Transition targetTransition = toState.getTransition(toEvent);
 			if (targetTransition == null) {
-				String msg = fileName + " - Missing transition for <case> <when> " + casen.when + " <to> " + casen.to + " <fire> " + casen.fire;
+				String msg = fileName + " - Missing transition for outcome when " + casen.when + " nextStage " + casen.nextStage + " then " + casen.then;
 				logger.info(msg);
 				throw new STMException(msg);
 			}
@@ -943,8 +943,8 @@ public class STMOptimizedBuilder<T extends STMContext> {
 	}
 
 	private void validateCaseWhenAndFire(String fileName, CaseNode casen) {
-		if (casen.when == null || casen.fire == null) {
-			String msg = fileName + " - Missing <case> <when> " + casen.when + " <to> " + casen.to + " <fire> " + casen.fire;
+		if (casen.when == null || casen.then == null) {
+			String msg = fileName + " - Missing outcome when " + casen.when + " nextStage " + casen.nextStage + " then " + casen.then;
 			logger.info(msg);
 			throw new STMException(msg);
 		}
@@ -953,7 +953,7 @@ public class STMOptimizedBuilder<T extends STMContext> {
 	private void validateDefaultForCallNode(String fileName, TransitionNode transitionNode, HashMap<String, Transition> transitions) {
 		if (transitionNode instanceof CallNode) {
 			if (!transitions.containsKey("default")) {
-				String msg = fileName + " - Missing transition for <case> <when> default as it is mandatory for Call event";
+				String msg = fileName + " - Missing otherwise, which is mandatory for a runStage step";
 				logger.info(msg);
 				throw new STMException(msg);
 			}
@@ -961,7 +961,7 @@ public class STMOptimizedBuilder<T extends STMContext> {
 	}
 
 	private void replaceActorForChoice(TransitionNode transitionNode, Transition normalTransition, HashMap<String, Transition> transitions) {
-		if (transitionNode.getCasesForIteration().size() > 0) {
+		if (transitionNode.getOutcomesForIteration().size() > 0) {
 			if (debug) {
 				logger.info(String.format("switch transition %s ------>  %s(%s)", normalTransition.getFromState().getName(), normalTransition.getFromEvent().getName(),
 						normalTransition.getTransitionHandle()));
@@ -1019,15 +1019,15 @@ public class STMOptimizedBuilder<T extends STMContext> {
 		validateToStateAndToEvent(transitionNode, fileName, state, msg, to, fire);
 		State eState = states.getState(to);
 		if (eState == null) {
-			String logmsg = fileName + " - state not exist for <state> " + to + " on <" + msg + ">  "
-					+ Transition.formatTranstion(state, transitionNode.when, transitionNode.to, transitionNode.fire, STMEvent.STOP);
+			String logmsg = fileName + " - state not exist for stage " + to + " on <" + msg + ">  "
+					+ Transition.formatTranstion(state, transitionNode.step, transitionNode.nextStage, transitionNode.then, STMEvent.STOP);
 			logger.info(logmsg);
 			throw new STMException(logmsg);
 		}
 		Transition errorTransition = eState.getTransition(events.getEvent(fire));
 		if (errorTransition == null) {
-			String logmsg = fileName + " - transition not exist for <fire> " + fire + " on <" + msg + ">  "
-					+ Transition.formatTranstion(state, transitionNode.when, transitionNode.to, transitionNode.fire, STMEvent.STOP);
+			String logmsg = fileName + " - transition not exist for then " + fire + " on <" + msg + ">  "
+					+ Transition.formatTranstion(state, transitionNode.step, transitionNode.nextStage, transitionNode.then, STMEvent.STOP);
 			logger.info(logmsg);
 			throw new STMException(logmsg);
 		}
@@ -1038,14 +1038,14 @@ public class STMOptimizedBuilder<T extends STMContext> {
 		// onError, onFailedCondition should have to and fire should be defined
 		// and the transiton and to state should exist
 		if (to == null) {
-			String logmsg = fileName + " - Missing  <to> on <" + msg + "> "
-					+ Transition.formatTranstion(state, transitionNode.when, transitionNode.to, transitionNode.fire, STMEvent.STOP);
+			String logmsg = fileName + " - Missing nextStage on " + msg + " "
+					+ Transition.formatTranstion(state, transitionNode.step, transitionNode.nextStage, transitionNode.then, STMEvent.STOP);
 			logger.info(logmsg);
 			throw new STMException(logmsg);
 		}
 		if (fire == null) {
-			String logmsg = fileName + " - missing <fire>   <" + msg + ">  "
-					+ Transition.formatTranstion(state, transitionNode.when, transitionNode.to, transitionNode.fire, STMEvent.STOP);
+			String logmsg = fileName + " - missing then on " + msg + " "
+					+ Transition.formatTranstion(state, transitionNode.step, transitionNode.nextStage, transitionNode.then, STMEvent.STOP);
 			logger.info(logmsg);
 			throw new STMException(logmsg);
 		}
@@ -1060,14 +1060,14 @@ public class STMOptimizedBuilder<T extends STMContext> {
 		Actor<T> condition = null;
 
 		boolean defaultEvent = false;
-		if (transitionNode.stmevent == null) {
-			transitionNode.stmevent = DEFAULT_STM_EVENT;
+		if (transitionNode.control == null) {
+			transitionNode.control = DEFAULT_STM_EVENT;
 			defaultEvent = true;
 		}
-		STMEvent next = STMEvent.valueOf(transitionNode.stmevent.toUpperCase());
-		if (transitionNode.condition != null) {
-			condition = createActor(transitionNode.condition, fromState.getName(), fromEvent.getName(), transitionNode, true);
-			if (transitionNode.actor == null) {
+		STMEvent next = STMEvent.valueOf(transitionNode.control.toUpperCase());
+		if (transitionNode.check != null) {
+			condition = createActor(transitionNode.check, fromState.getName(), fromEvent.getName(), transitionNode, true);
+			if (transitionNode.action == null) {
 				transition = new ConditionOnly(fromState, fromEvent, toState, toEvent, next, null, (Actor<STMContext>) condition, null);
 				fromState.addTransition(transition);
 			}
@@ -1082,8 +1082,8 @@ public class STMOptimizedBuilder<T extends STMContext> {
 			transition.setActor(returnState);
 			fromState.addTransition(transition);
 			returnStates.add(fromState.getName());
-		} else if (transitionNode.actor != null) {
-			if (transitionNode.condition != null) {
+		} else if (transitionNode.action != null) {
+			if (transitionNode.check != null) {
 				transition = new ConditionAndActor(fromState, fromEvent, toState, toEvent, next, null, (Actor<STMContext>) condition, null);
 			} else {
 				if (defaultEvent) {
@@ -1094,7 +1094,7 @@ public class STMOptimizedBuilder<T extends STMContext> {
 			}
 			addActor(states, events, transitionNode, transition);
 			fromState.addTransition(transition);
-		} else if (transitionNode.condition == null) {
+		} else if (transitionNode.check == null) {
 			transition = new PlaceHolderTransition(fromState, fromEvent, toState, toEvent, next);
 			fromState.addTransition(transition);
 		}
@@ -1102,7 +1102,7 @@ public class STMOptimizedBuilder<T extends STMContext> {
 
 	public void callTransition(Transition transition, StateCollection states, EventCollection events, State fromState, TransitionNode transitionNode, Event fromEvent,
 			State toState, Event toEvent) {
-		Event newEvent = createEvent(events, transitionNode.when + RESULT);
+		Event newEvent = createEvent(events, transitionNode.step + RESULT);
 		Transition newResultTransition = cloneTransition(transition, fromState, newEvent, toState, toEvent);
 		transition.setOnResultTransition(newResultTransition);
 		newResultTransition.setActor(transition.getActor());
@@ -1113,7 +1113,7 @@ public class STMOptimizedBuilder<T extends STMContext> {
 
 	@SuppressWarnings({ "unchecked" })
 	void addActor(StateCollection states, EventCollection events, TransitionNode transitionNode, Transition transition) {
-		Actor<T> actor = createActor(transitionNode.actor, transition.getFromState().getName(), transition.getFromEvent().getName(), transitionNode, false);
+		Actor<T> actor = createActor(transitionNode.action, transition.getFromState().getName(), transition.getFromEvent().getName(), transitionNode, false);
 		transition.setActor((Actor<STMContext>) actor);
 	}
 
@@ -1121,7 +1121,7 @@ public class STMOptimizedBuilder<T extends STMContext> {
 	public Actor<T> createActor(ActorNode actorNode, String stateName, String eventName, TransitionNode transitionNode, boolean condition) {
 		Actor<T> actor = null;
 		if (actorNode.className == null && actorNode.beanName == null && actorNode.beanType == null) {
-			String msg = "Handler missing either className for beanName " + actorNode.className + " " + actorNode.beanType + " " + actorNode.beanName
+			String msg = "Handler missing either class for beanName " + actorNode.className + " " + actorNode.beanType + " " + actorNode.beanName
 					+ " so assuming the event name as bean Name " + eventName;
 			if (debug) {
 				logger.info(msg);
@@ -1136,8 +1136,8 @@ public class STMOptimizedBuilder<T extends STMContext> {
 		}
 		actor = createActorDirectOrWrapper(actorNode, transitionNode, condition);
 		if (actor == null) {
-			throw new STMException("State name Actor " + stateName + ",eventName=" + eventName + " handler is null for className/beanName/beanType/methodName "
-					+ actorNode.className + "/" + actorNode.beanName + "/" + actorNode.beanType + "/" + actorNode.methodName);
+			throw new STMException("State name Actor " + stateName + ",eventName=" + eventName + " handler is null for class/beanName/beanType/method "
+					+ actorNode.className + "/" + actorNode.beanName + "/" + actorNode.beanType + "/" + actorNode.method);
 
 		}
 		return actor;
@@ -1153,7 +1153,7 @@ public class STMOptimizedBuilder<T extends STMContext> {
 				actor = createActorForActorBean(actor, actorNode, transitionNode, condition);
 			} catch (Exception e) {
 				logger.error(e.getMessage(), e);
-				throw new STMException("create handler instance failed for Actor " + actorNode.className);
+				throw new STMException("create handler instance failed for Actor " + actorNode.className + ": " + e.getMessage(), e);
 			}
 		} else if (actorNode.beanType != null) {
 			if (actorNode.getParametesForIteration().size() > 0) {
@@ -1173,9 +1173,9 @@ public class STMOptimizedBuilder<T extends STMContext> {
 		Actor<T> actor = beanActor;
 		String methodName = "handle";
 		MethodReturnType methodReturnType = new MethodReturnType();
-		if (actorNode.methodName != null) {
-			actor = (Actor<T>) createTransitionLambda(beanActor, actorNode.methodName, actorNode, condition, methodReturnType);
-			methodName = actorNode.methodName;
+		if (actorNode.method != null) {
+			actor = (Actor<T>) createTransitionLambda(beanActor, actorNode.method, actorNode, condition, methodReturnType);
+			methodName = actorNode.method;
 		}
 		if (methodReturnType.methodReturnType != null && condition && (methodReturnType.methodReturnType != Boolean.class && methodReturnType.methodReturnType != boolean.class)) {
 			logger.info("Method {} return type is not boolean beanName={}", methodName, actorNode.beanName);
@@ -1195,12 +1195,22 @@ public class STMOptimizedBuilder<T extends STMContext> {
 
 	@SuppressWarnings("unchecked")
 	private Actor<T> createTransitionLambda(Actor<T> bean, String methodName, ActorNode actorNode, boolean condition, MethodReturnType methodReturnType) {
+		if (actorNode.lookupMethod == null && actorNode.inputMap != null) {
+			requireInputParameter(bean, methodName, Map.class, "a map");
+		} else if (actorNode.lookupMethod == null && actorNode.input != null) {
+			requireInputParameter(bean, methodName, String.class, "a text");
+		}
 		try {
 			if (actorNode.lookupMethod == null) {
-				if (actorNode.argParameter != null) {
+				if (actorNode.inputMap != null) {
+					return (Actor<T>) new MethodWithMapArg(bean,
+							getLambdaCallSite(bean, methodHandleLookup, methodName, condition, Lists.newArrayList(STMContext.class, Map.class), methodReturnType), methodName,
+							actorNode.inputMap);
+				}
+				if (actorNode.input != null) {
 					return (Actor<T>) new MethodWithStringArg(bean,
 							getLambdaCallSite(bean, methodHandleLookup, methodName, condition, Lists.newArrayList(STMContext.class, String.class), methodReturnType), methodName,
-							actorNode.argParameter);
+							actorNode.input);
 				}
 				return (Actor<T>) new MethodActor(bean, getLambdaCallSite(bean, methodHandleLookup, methodName, condition, Lists.newArrayList(STMContext.class), methodReturnType),
 						methodName);
@@ -1226,7 +1236,18 @@ public class STMOptimizedBuilder<T extends STMContext> {
 		return null;
 	}
 
-	public static class MethodReturnType {
+	/** {@code input} needs {@code method(context, T)} where T accepts the input's type; fail the build otherwise. */
+	private static void requireInputParameter(Object bean, String methodName, Class<?> inputType, String what) {
+		for (Method method : bean.getClass().getMethods()) {
+			if (method.getName().equals(methodName) && method.getParameterCount() == 2 && method.getParameterTypes()[1].isAssignableFrom(inputType)) {
+				return;
+			}
+		}
+		throw new STMException("input is " + what + ", but " + bean.getClass().getName() + " has no public method " + methodName + "(context, "
+				+ inputType.getSimpleName() + (inputType == Map.class ? "<String, String>" : "") + ")");
+	}
+
+		public static class MethodReturnType {
 		Class<?> methodReturnType;
 	}
 

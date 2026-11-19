@@ -26,7 +26,7 @@ class STMBeanDefinitionRegistryTest {
 	void registersActorBeansAndPublishesTheMachine() {
 		try (AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext()) {
 			ctx.getEnvironment().getPropertySources().addFirst(
-					new MapPropertySource("test", Map.of(STMBeanDefinitionRegistry.STM_CONFIG_LOCATIONS, "classpath:stm/bean-flow.xml")));
+					new MapPropertySource("test", Map.of(STMBeanDefinitionRegistry.STM_CONFIG_LOCATIONS, "classpath:stm/bean-flow.yaml")));
 			ctx.registerBean(STMBeanDefinitionRegistry.class);
 			ctx.refresh();
 
@@ -44,7 +44,7 @@ class STMBeanDefinitionRegistryTest {
 	@Test
 	void explicitConfigFileOverridesTheProperty() {
 		try (AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext()) {
-			ctx.registerBean(STMBeanDefinitionRegistry.class, () -> new STMBeanDefinitionRegistry("classpath:stm/order-flow.xml"));
+			ctx.registerBean(STMBeanDefinitionRegistry.class, () -> new STMBeanDefinitionRegistry("classpath:stm/order-flow.yaml"));
 			ctx.refresh();
 			assertInstanceOf(STMFactory.class, ctx.getBean("order.flow"));
 			assertNotNull(STMFactory.getFsmAllStateful().get("order.flow"));

@@ -1,65 +1,68 @@
-# The same flow as order-flow.xml, in YAML.
-# YAML uses the Java property names: states / transitions / calls / returns / actor / condition / cases / onError / onFailedCondition.
+# The example order flow from the README.
+# Keys: startStage, startStep, defaults, stages, steps, step, then, nextStage, runStage, returns,
+#       outcomes, otherwise, control, action, check, onFalse, onError, class, method, input.
 name: order.flow
-start: order.s
-fire: order.received
+startStage: order
+startStep: received
 
-onError: { to: failed.s, fire: order.error }
-onFailedCondition: { to: failed.s, fire: order.rejected }
+defaults:
+  onError: { nextStage: failed, then: error }
+  onFalse: { nextStage: failed, then: rejected }
 
-states:
-  - name: order.s
-    transitions:
-      - when: order.received
-        fire: order.validate
-        actor: { className: com.easysoft.stm.example.OrderActions, methodName: receive }
-      - when: order.validate
-        fire: order.pay
-        condition: { className: com.easysoft.stm.example.OrderActions, methodName: isValid }
-    calls:
-      - when: order.pay
-        to: payment.s
-        fire: payment.start
-        cases:
-          - { when: payment.approved, to: shipping.s, fire: ship.choose }
-          - { when: default, to: failed.s, fire: order.declined }
+stages:
+  - name: order
+    steps:
+      - step: received
+        then: validate
+        action: { class: com.easysoft.stm.example.OrderActions, method: receive }
+      - step: validate
+        then: pay
+        check: { class: com.easysoft.stm.example.OrderActions, method: isValid }
+      # run the payment stage as a sub-flow, then route on the step it finished with
+      - step: pay
+        runStage: payment
+        then: start
+        outcomes:
+          - { when: approved, nextStage: shipping, then: choose }
+        otherwise: { nextStage: failed, then: declined }
 
-  - name: payment.s
-    transitions:
-      - when: payment.start
-        fire: payment.approved
-        condition: { className: com.easysoft.stm.example.OrderActions, methodName: charge }
-        onFailedCondition: { to: this, fire: payment.declined }
+  - name: payment
+    steps:
+      - step: start
+        then: approved
+        # input passes named texts to the method: charge(order, Map<String, String> input)
+        check: { class: com.easysoft.stm.example.OrderActions, method: charge, input: { creditLimit: 1000 } }
+        onFalse: { nextStage: this, then: declined }
     returns:
-      - when: payment.approved
-      - when: payment.declined
+      - step: approved
+      - step: declined
 
-  - name: shipping.s
-    transitions:
-      - when: ship.choose
-        fire: ship.standard
-        actor: { className: com.easysoft.stm.example.OrderActions, methodName: shippingMethod }
-        cases:
-          - { when: EXPRESS, fire: ship.express }
-      - when: ship.standard
-        fire: order.complete
-        actor: { className: com.easysoft.stm.example.OrderActions, methodName: shipStandard }
-      - when: ship.express
-        fire: order.complete
-        actor: { className: com.easysoft.stm.example.OrderActions, methodName: shipExpress }
-      - when: order.complete
-        stmevent: stop
+  - name: shipping
+    steps:
+      - step: choose
+        then: standard
+        action: { class: com.easysoft.stm.example.OrderActions, method: shippingMethod }
+        outcomes:
+          - { when: EXPRESS, then: express }
+      - step: standard
+        then: complete
+        action: { class: com.easysoft.stm.example.OrderActions, method: shipStandard }
+      - step: express
+        then: complete
+        action: { class: com.easysoft.stm.example.OrderActions, method: shipExpress }
+      - step: complete
+        control: stop
 
-  - name: failed.s
-    transitions:
-      - when: order.error
-        fire: order.failed
-        actor: { className: com.easysoft.stm.example.OrderActions, methodName: recordError }
-      - when: order.rejected
-        fire: order.failed
-        actor: { className: com.easysoft.stm.example.OrderActions, methodName: reject }
-      - when: order.declined
-        fire: order.failed
-        actor: { className: com.easysoft.stm.example.OrderActions, methodName: decline }
-      - when: order.failed
-        stmevent: stop
+  - name: failed
+    steps:
+      - step: error
+        then: done
+        action: { class: com.easysoft.stm.example.OrderActions, method: recordError }
+      - step: rejected
+        then: done
+        action: { class: com.easysoft.stm.example.OrderActions, method: reject }
+      - step: declined
+        then: done
+        action: { class: com.easysoft.stm.example.OrderActions, method: decline }
+      - step: done
+        control: stop

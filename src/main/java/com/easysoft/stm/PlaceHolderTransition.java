@@ -3,7 +3,7 @@ package com.easysoft.stm;
 import com.easysoft.stm.STM.STMEvent;
 
 /**
- * A transition without an actor or condition that only forwards to its {@code to}/{@code fire}.
+ * A transition without an actor or condition that only forwards to its {@code nextStage}/{@code then}.
  * The builder collapses chains of these at build time.
  */
 public class PlaceHolderTransition extends Transition {

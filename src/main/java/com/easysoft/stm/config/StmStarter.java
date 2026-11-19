@@ -12,7 +12,7 @@ import jakarta.annotation.PostConstruct;
 
 /**
  * Convenience bean that starts a named machine from a fixed state and event:
- * {@code new StmStarter("order.flow", "order.s", "order.received")}.
+ * {@code new StmStarter("order.flow", "order", "received")}.
  */
 public class StmStarter {
 

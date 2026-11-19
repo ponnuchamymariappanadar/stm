@@ -5,7 +5,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * The state-machine engine. Runs transitions one after another, following each transition's
- * {@code to}/{@code fire} (or a route chosen by a condition, case, call/return or error), until a
+ * {@code nextStage}/{@code then} (or a route chosen by a check, case, call/return or error), until a
  * transition reports {@link STMEvent#STOP}.
  * <p>
  * One instance can run many flows concurrently, each with its own context from

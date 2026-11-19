@@ -10,7 +10,7 @@ import com.easysoft.stm.STM.STMEvent;
 
 /**
  * Per-run engine state: current and next transition, last actor result, error state and the
- * call stack used by {@code <Call>}/{@code <Return>}. Obtain one from
+ * call stack used by {@code runStage} rules and {@code returns}. Obtain one from
  * {@link STMStateful#createContext()} and keep it in your {@link STMContext}.
  * <p>
  * Use {@link #start(STMContext)} to run a flow, and {@link #next(STMContext, String, String)} from

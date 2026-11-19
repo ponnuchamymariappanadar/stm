@@ -3,31 +3,32 @@
 [![CI](https://github.com/ponnuchamymariappanadar/stm/actions/workflows/ci.yml/badge.svg)](https://github.com/ponnuchamymariappanadar/stm/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-STM runs business flows that you describe in **XML or YAML** and implement as **plain Java methods**.
+STM runs business flows that you describe in **YAML** and implement as **plain Java methods**.
 The configuration says *what happens next*; your code only does the work for each step.
 
-```xml
-<State name="order.s">
-    <Transition when="order.received" fire="order.validate">
-        <Actor className="com.example.OrderActions" methodName="receive"/>
-    </Transition>
-    <Transition when="order.validate" fire="order.pay">
-        <Condition className="com.example.OrderActions" methodName="isValid"/>
-    </Transition>
-    ...
-</State>
+```yaml
+stages:
+  - name: order
+    steps:
+      - step: received
+        then: validate
+        action: { class: com.example.OrderActions, method: receive }
+      - step: validate
+        then: pay
+        check: { class: com.example.OrderActions, method: isValid }
 ```
 
 ## Features
 
-- **Flows as configuration**: states, events and transitions in XML or YAML, split across files if you like.
-- **Plain Java actors**: any public method `Object name(YourContext ctx)` can be a step, bound at startup through `LambdaMetafactory` (no reflection per call).
-- **Conditions** with a failure route, **Case** routing on a method's return value, and **Call/Return** sub-flows you can reuse.
-- **Error handling**: exceptions go to a per-transition or global `OnError` route, with the exception available on the context.
+- **Flows as configuration**: stages and steps in YAML, split across files if you like.
+- **Plain Java actions**: any public method `Object name(YourContext ctx)` can be a step, bound at startup through `LambdaMetafactory` (no reflection per call).
+- **Checks** with a route for when they fail (`onFalse`), **outcomes** that route on a method's return value, and **sub-flows** (`runStage` steps and `returns`) you can reuse.
+- **Error handling**: exceptions go to the step's own `onError` route or the one under `defaults`, with the exception available on the context.
 - **Validation at startup**: missing targets, duplicate events, missing handlers, infinite placeholder loops, and unknown methods are all reported before anything runs.
-- **Placeholder reduction**: transitions that only forward to another transition are collapsed away at build time.
+- **Placeholder reduction**: steps that only forward to another step are collapsed away at build time.
+- **Decision rules**: conditions, decisions and named outcomes in their own YAML files, used as checks and actions (see [Decision rules](#decision-rules)).
 - **Tracing**: a debug context records every step with its result and timing in one log line.
-- **Spring integration** (optional): actors referenced by `beanType` are registered as Spring beans automatically.
+- **Spring integration** (optional): actions referenced by `beanType` are registered as Spring beans automatically.
 
 ## Contents
 
@@ -48,7 +49,7 @@ The configuration says *what happens next*; your code only does the work for eac
 
 - Java 17 or newer
 - Maven 3.9+
-- Built on Spring Boot 4.0 dependency management (Jackson XML/YAML, SLF4J, Commons Lang, Guava, Lombok)
+- Built on Spring Boot 4.0 dependency management (Jackson YAML, SLF4J, Commons Lang, Guava, Lombok)
 
 Add the dependency (available on Maven Central once version 0.1.0 is released; until then, build it
 locally with `mvn install`):
@@ -66,7 +67,7 @@ The Java packages are `com.easysoft.stm.*`.
 ## Quick start
 
 The complete example below lives in the test sources and runs as part of the build
-([`order-flow.xml`](src/test/resources/stm/order-flow.xml),
+([`order-flow.yaml`](src/test/resources/stm/order-flow.yaml),
 [`OrderActions`](src/test/java/com/easysoft/stm/example/OrderActions.java),
 [`OrderFlowExampleTest`](src/test/java/com/easysoft/stm/example/OrderFlowExampleTest.java)).
 
@@ -105,11 +106,15 @@ public class OrderActions implements Actor<OrderContext> {
         return order.getOrderId();
     }
 
-    public boolean isValid(OrderContext order) { return order.getAmount() > 0; }   // a Condition
+    public boolean isValid(OrderContext order) { return order.getAmount() > 0; }   // a check
 
-    public boolean charge(OrderContext order) { ... }                              // a Condition
+    public boolean charge(OrderContext order, Map<String, String> input) {        // a check with input
+        boolean approved = order.getAmount() <= Integer.parseInt(input.get("creditLimit"));
+        order.record(approved ? "charged" : "charge refused");
+        return approved;
+    }
 
-    public Shipping shippingMethod(OrderContext order) {                           // drives <Case>
+    public Shipping shippingMethod(OrderContext order) {                           // drives outcomes
         return order.isExpress() ? Shipping.EXPRESS : Shipping.STANDARD;
     }
 
@@ -126,77 +131,84 @@ public class OrderActions implements Actor<OrderContext> {
 
 ### 3. The flow
 
-```xml
-<STM name="order.flow" start="order.s" fire="order.received">
+```yaml
+name: order.flow
+startStage: order
+startStep: received
 
-    <!-- Defaults for every transition that does not declare its own -->
-    <OnError           to="failed.s" fire="order.error"/>
-    <OnFailedCondition to="failed.s" fire="order.rejected"/>
+# Routes for every step that does not declare its own
+defaults:
+  onError: { nextStage: failed, then: error }
+  onFalse: { nextStage: failed, then: rejected }
 
-    <State name="order.s">
-        <Transition when="order.received" fire="order.validate">
-            <Actor className="com.example.OrderActions" methodName="receive"/>
-        </Transition>
+stages:
+  - name: order
+    steps:
+      - step: received
+        then: validate
+        action: { class: com.example.OrderActions, method: receive }
+      - step: validate
+        then: pay
+        check: { class: com.example.OrderActions, method: isValid }
+      # run the payment stage as a sub-flow, then route on the step it finished with
+      - step: pay
+        runStage: payment
+        then: start
+        outcomes:
+          - { when: approved, nextStage: shipping, then: choose }
+        otherwise: { nextStage: failed, then: declined }
 
-        <Transition when="order.validate" fire="order.pay">
-            <Condition className="com.example.OrderActions" methodName="isValid"/>
-        </Transition>
+  - name: payment
+    steps:
+      - step: start
+        then: approved
+        # input passes named texts to the method: charge(order, Map<String, String> input)
+        check: { class: com.example.OrderActions, method: charge, input: { creditLimit: 1000 } }
+        onFalse: { nextStage: this, then: declined }
+    returns:
+      - step: approved
+      - step: declined
 
-        <!-- Run the payment sub-flow; route on the event it returns with -->
-        <Call when="order.pay" to="payment.s" fire="payment.start">
-            <Case when="payment.approved" to="shipping.s" fire="ship.choose"/>
-            <Case when="default"          to="failed.s"   fire="order.declined"/>
-        </Call>
-    </State>
+  - name: shipping
+    steps:
+      - step: choose
+        then: standard
+        action: { class: com.example.OrderActions, method: shippingMethod }
+        outcomes:
+          - { when: EXPRESS, then: express }
+      - step: standard
+        then: complete
+        action: { class: com.example.OrderActions, method: shipStandard }
+      - step: express
+        then: complete
+        action: { class: com.example.OrderActions, method: shipExpress }
+      - step: complete
+        control: stop
 
-    <State name="payment.s">
-        <Transition when="payment.start" fire="payment.approved">
-            <Condition className="com.example.OrderActions" methodName="charge"/>
-            <OnFailedCondition to="this" fire="payment.declined"/>
-        </Transition>
-        <Return when="payment.approved"/>
-        <Return when="payment.declined"/>
-    </State>
-
-    <State name="shipping.s">
-        <!-- shippingMethod() returns EXPRESS or STANDARD -->
-        <Transition when="ship.choose" fire="ship.standard">
-            <Actor className="com.example.OrderActions" methodName="shippingMethod"/>
-            <Case when="EXPRESS" fire="ship.express"/>
-        </Transition>
-        <Transition when="ship.standard" fire="order.complete">
-            <Actor className="com.example.OrderActions" methodName="shipStandard"/>
-        </Transition>
-        <Transition when="ship.express" fire="order.complete">
-            <Actor className="com.example.OrderActions" methodName="shipExpress"/>
-        </Transition>
-        <Transition when="order.complete" stmevent="stop"/>
-    </State>
-
-    <State name="failed.s">
-        <Transition when="order.error" fire="order.failed">
-            <Actor className="com.example.OrderActions" methodName="recordError"/>
-        </Transition>
-        <Transition when="order.rejected" fire="order.failed">
-            <Actor className="com.example.OrderActions" methodName="reject"/>
-        </Transition>
-        <Transition when="order.declined" fire="order.failed">
-            <Actor className="com.example.OrderActions" methodName="decline"/>
-        </Transition>
-        <Transition when="order.failed" stmevent="stop"/>
-    </State>
-</STM>
+  - name: failed
+    steps:
+      - step: error
+        then: done
+        action: { class: com.example.OrderActions, method: recordError }
+      - step: rejected
+        then: done
+        action: { class: com.example.OrderActions, method: reject }
+      - step: declined
+        then: done
+        action: { class: com.example.OrderActions, method: decline }
+      - step: done
+        control: stop
 ```
 
 ### 4. Build once, run many times
 
 ```java
 STMOptimizedBuilder<STMContext> builder = new STMOptimizedBuilder<>(null, false);
-builder.addFile("classpath:stm/order-flow.xml");     // or a file path, or .yml/.yaml
+builder.addFile("classpath:stm/order-flow.yaml");    // or a file path; .yaml or .yml
 STMStateful<STMContext> stm = builder.build();       // validates the whole flow
 
 OrderContext order = new OrderContext(stm.createContext(), "A-1", 100, false);
-order.getSTMContext().start(order);                  // runs until a transition stops
+order.getSTMContext().start(order);                  // runs until a step stops
 
 order.getHistory();   // [received, charged, shipped standard]
 ```
@@ -207,91 +219,108 @@ The built `STMStateful` is reusable. Create a new context for every run.
 |---|---|
 | amount 100 | `received, charged, shipped standard` |
 | amount 100, express | `received, charged, shipped express` |
-| amount 0 | `received, rejected` (global `OnFailedCondition`) |
-| amount 5000 | `received, charge refused, declined` (payment returns `payment.declined`, matched by `default`) |
-| no order id | `error: order id is required` (global `OnError`) |
+| amount 0 | `received, rejected` (`onFalse` under `defaults`) |
+| amount 5000 | `received, charge refused, declined` (payment finishes with `declined`, caught by `otherwise`) |
+| no order id | `error: order id is required` (`onError` under `defaults`) |
 
 ## Core concepts
 
-A transition reads as: *in state **S**, when event **W** happens, run the actor, then fire event **F** in state **T***.
+A step reads as: *in stage **S**, at step **W**, run the action, then continue with step **F** in stage **T***.
 
-```
-<State name="S">
-    <Transition when="W" to="T" fire="F"> <Actor .../> </Transition>
-</State>
+```yaml
+stages:
+  - name: S
+    steps:
+      - { step: W, nextStage: T, then: F, action: { ... } }
 ```
 
 | Concept | Meaning |
 |---|---|
-| **State** | A named group of transitions. |
-| **Event** (`when` / `fire`) | Names a transition inside a state. `fire` says which transition runs next. |
-| **Transition** | One step: optionally a condition, optionally an actor, then the next `(to, fire)`. |
-| **Actor** | Java code run by a transition. Its return value becomes the context's *last result*. |
-| **Condition** | A `boolean` method. `true` continues to `fire`; `false` goes to `OnFailedCondition`. |
-| **Case** | Routes on the actor's return value (`toString()`), falling back to `default`, then to `fire`. |
-| **Call / Return** | Runs another state as a sub-flow and routes on the `when` of the `Return` it ended at. |
-| **OnError** | Where to go when an actor or condition throws. The exception is on `getSTMContext().getException()`. |
-| **stmevent** | `next` (default) continues; `stop` ends the run after this transition. |
+| **Stage** | A named group of steps. |
+| **Step** | One entry in `steps`, named by `step`: optionally a check, optionally an action, then the next `(nextStage, then)`. `then` says which step runs next. |
+| **Action** | Java code run by a step. Its return value becomes the context's *last result*. |
+| **Check** | A `boolean` method. `true` continues to `then`; `false` goes to `onFalse`. |
+| **Outcome** | Routes on the action's return value (`toString()`); `otherwise` catches any other value, and with no match the step goes on to `then`. |
+| **Run / Return** | A step with `runStage` runs that stage as a sub-flow and routes its `outcomes` on the `step` of the `returns` entry the sub-flow ended at. |
+| **onError** | Where to go when an action or check throws. The exception is on `getSTMContext().getException()`. |
+| **control** | `next` (default) continues; `stop` ends the run after this step. |
 
-### Rules and defaults
+### How steps behave
 
-- **`to` omitted** (or `to="this"`) means the current state.
-- **Both `to` and `fire` omitted** makes the transition terminal (`stmevent="stop"`).
-- **`to` without `fire`** is an error.
-- **Default start**: the `start`/`fire` attributes on `<STM>`. Without them, it is the first `<State>` in the first file and its first **`<Transition>`**. `<Call>` and `<Return>` elements are not considered, so set `start`/`fire` when a flow begins with a `<Call>`.
-- **Error handlers are mandatory.** Every transition with an actor needs a local or global `<OnError>`, and every transition with a condition needs a local or global `<OnFailedCondition>`.
-- **Placeholders**: a transition without actor or condition just forwards. Chains of these are collapsed at build time. Cycles are rejected.
-- **Loop guard**: a single run stops after 100 state changes (`setMaxStateChangeAllowed` to change it), in case a flow loops forever.
+- **`nextStage` omitted** (or `nextStage: this`) means the current stage.
+- **Both `nextStage` and `then` omitted** makes the step terminal (`control: stop`).
+- **`nextStage` without `then`** is an error.
+- **Default start**: the top-level `startStage`/`startStep`. Without them, it is the first stage in the first file and its first entry in **`steps`** that is not a call (`runStage`); `returns` are not considered either, so set `startStage`/`startStep` when a flow begins with a call.
+- **Error handlers are mandatory.** Every step with an action needs an `onError`, and every step with a check needs an `onFalse`, either on the step itself or under `defaults`.
+- **Placeholders**: a step without action or check just forwards. Chains of these are collapsed at build time. Cycles are rejected.
+- **Loop guard**: a single run stops after 100 stage changes (`setMaxStateChangeAllowed` to change it), in case a flow loops forever.
 - An error raised *while already handling an error* stops the run.
 
 ## Configuration reference
 
-### `<STM>` (root)
+Flows are YAML files ending in `.yaml` or `.yml`; any other file is rejected. Unknown keys are
+errors, so a misspelled key is reported when the flow is built.
 
-| Attribute | Description |
+### Top level
+
+| Key | Description |
 |---|---|
 | `name` | Machine name (from the first file loaded). |
-| `start`, `fire` | Default start state and event. |
-| `stmFiles` | Comma-separated list of more files to load (paths or `classpath:` locations). |
+| `startStage`, `startStep` | Where a run begins: the stage, and the step in it. |
+| `defaults` | `onError` and `onFalse` (each `{ nextStage, then }`) for every step that does not set its own. |
+| `stages` | The list of stages. |
+| `include` | More flow files to load: a list (`[ a.yaml, b.yaml ]`) or comma-separated text. Paths or `classpath:` locations. |
 | `postProcessor` | Comma-separated Spring bean types implementing `STMOptimizedBuilder.STMPostProcessor`, called after build. |
 
-Children: `<OnError>`, `<OnFailedCondition>` (global defaults) and `<State>` elements.
+### A stage
 
-### `<State name="...">`
-
-Children: `<Transition>`, `<Call>`, `<Return>`.
-
-### `<Transition>`, `<Call>`, `<Return>`
-
-| Attribute | Description |
+| Key | Description |
 |---|---|
-| `when` | **Required.** The event that selects this transition. Unique within the state. |
-| `to` | Target state. Defaults to the current state. `this` also means the current state. |
-| `fire` | Event to fire in the target state. |
-| `stmevent` | `next` (default) or `stop`. |
+| `name` | **Required.** The stage name. |
+| `steps` | The steps. A step with `runStage` runs another stage as a sub-flow. |
+| `returns` | Steps that end a sub-flow and return to the caller. |
 
-| Child | Description |
+### Entries in `steps` and `returns`
+
+| Key | Description |
 |---|---|
-| `<Actor>` | The step's code. |
-| `<Condition>` | A guard. Same attributes as `<Actor>`; the method must return `boolean`/`Boolean`. |
-| `<OnError to fire>` | Overrides the global error route. |
-| `<OnFailedCondition to fire>` | Overrides the global failed-condition route. |
-| `<Case when to fire>` | Value-based routing. `when="default"` catches unmatched values. A `<Call>` **must** have a `default` case. |
+| `step` | **Required.** The name of this step. Unique within the stage. |
+| `nextStage` | Target stage. Defaults to the current stage. `this` also means the current stage. |
+| `runStage` | Runs this stage as a sub-flow, then comes back (instead of `nextStage`; not both). |
+| `then` | The step to continue with in the target stage. |
+| `control` | `next` (default) or `stop`. |
+| `action` | The step's code. |
+| `check` | A guard. Same keys as `action`; the method must return `boolean`/`Boolean`. |
+| `onError: { nextStage, then }` | Overrides the error route under `defaults`. |
+| `onFalse: { nextStage, then }` | Overrides the failed-check route under `defaults`. |
+| `outcomes: [ { when, nextStage, then } ]` | Value-based routing: each outcome names a result with `when`. An outcome's `nextStage` defaults to the current stage. |
+| `otherwise: { nextStage, then }` | Where to go when no outcome matches. A `runStage` step **must** have one. |
 
-`<Call when to fire>` pushes a return point, then continues at `to`/`fire`. `<Return when>` pops it and routes the caller's `<Case>`s on that `when` value.
+A step with `runStage` pushes a return point, then continues at `runStage`/`then`. A `returns`
+entry pops it and routes the calling step's `outcomes` on that `step` value:
 
-### `<Actor>` / `<Condition>`
+```yaml
+steps:
+  - step: pay
+    runStage: payment          # run the payment stage as a sub-flow
+    then: start
+    outcomes:
+      - { when: approved, nextStage: shipping, then: choose }
+    otherwise: { nextStage: failed, then: declined }
+```
 
-| Attribute | Description |
+### `action` / `check`
+
+| Key | Description |
 |---|---|
-| `className` | Class to instantiate with its no-argument constructor (no Spring needed). |
+| `class` | Class to instantiate with its no-argument constructor (no Spring needed). |
 | `beanType` | Spring bean type. It is registered as a bean automatically when using `STMBeanDefinitionRegistry`. |
-| `beanName` | Existing Spring bean name. If none of the three is given, the `when` event name is used as the bean name. |
-| `methodName` | Method to call. If omitted, `Actor.handle(ctx)` is called. |
-| `argParameter` | A fixed string passed as the second argument: `method(ctx, String)`. |
+| `beanName` | Existing Spring bean name. If none of the three is given, the `step` name is used as the bean name. |
+| `method` | Method to call. If omitted, `Actor.handle(ctx)` is called. |
+| `input` | A fixed value passed as the second argument: text calls `method(ctx, String)`; a map such as `{ limit: 10000, currency: USD }` calls `method(ctx, Map<String, String>)`. Values are always text, exactly as written. |
 | `lookupMethod` | A method whose result is passed as the second argument: `method(ctx, lookupMethod(ctx))`. Use `bean.method` to call a method on another bean, or `lookupBeanType` to name its type. |
 | `scope` | `prototype` for a new bean per lookup; singleton by default. |
-| `<Property name value>` | Bean properties. Numeric names (`0`..`4`) become constructor arguments. |
+| `properties: [ { name, value } ]` | Bean properties. Numeric names (`0`..`4`) become constructor arguments. |
 
 ### Placeholders in any value
 
@@ -299,51 +328,44 @@ Children: `<Transition>`, `<Call>`, `<Return>`.
 - Other values pass through the builder's `StringValueResolver`, if one is supplied
   (`new STMOptimizedBuilder<>(appContext, false, resolver)`).
 
-### YAML
-
-YAML uses the Java property names (`states`, `transitions`, `calls`, `returns`, `actor`, `condition`,
-`cases`, `onError`, `onFailedCondition`). A file ending in `.yml` or `.yaml` is read as YAML.
-
-```yaml
-name: order.flow
-start: order.s
-fire: order.received
-onError: { to: failed.s, fire: order.error }
-onFailedCondition: { to: failed.s, fire: order.rejected }
-states:
-  - name: order.s
-    transitions:
-      - when: order.received
-        fire: order.validate
-        actor: { className: com.example.OrderActions, methodName: receive }
-    calls:
-      - when: order.pay
-        to: payment.s
-        fire: payment.start
-        cases:
-          - { when: payment.approved, to: shipping.s, fire: ship.choose }
-          - { when: default, to: failed.s, fire: order.declined }
-  - name: payment.s
-    returns:
-      - when: payment.approved
-```
-
-The full example is in [`order-flow.yaml`](src/test/resources/stm/order-flow.yaml).
-
 ## Writing actors
 
 An actor class implements `Actor<YourContext>`. Methods are matched by name and parameter types:
 
 | Configuration | Method signature |
 |---|---|
-| `methodName="m"` | `Object m(YourContext ctx)` (any return type) |
-| `<Condition methodName="m">` | `boolean m(YourContext ctx)` or `Boolean` |
-| `methodName="m" argParameter="x"` | `Object m(YourContext ctx, String arg)` |
-| `methodName="m" lookupMethod="l"` | `Object m(YourContext ctx, T value)` with `T l(YourContext ctx)` |
-| no `methodName` | override `Object handle(YourContext ctx)` |
+| `action: { method: m }` | `Object m(YourContext ctx)` (any return type) |
+| `check: { method: m }` | `boolean m(YourContext ctx)` or `Boolean` |
+| `{ method: m, input: x }` | `Object m(YourContext ctx, String arg)` |
+| `{ method: m, input: { a: 1, b: x } }` | `Object m(YourContext ctx, Map<String, String> input)` |
+| `{ method: m, lookupMethod: l }` | `Object m(YourContext ctx, T value)` with `T l(YourContext ctx)` |
+| no `method` | override `Object handle(YourContext ctx)` |
 
-The return value is stored as the *last result* (`ctx.getLastSTMResult()`) and is what `<Case>` routes on.
+The return value is stored as the *last result* (`ctx.getLastSTMResult()`) and is what `outcomes` route on.
 An actor may also return an `STMEvent` (for example `STMEvent.STOP`) to control the engine directly.
+
+### Passing settings with `input`
+
+`input` gives a step fixed values from the flow file, so one method can serve several steps. The
+order example sets its credit limit this way:
+
+```yaml
+- step: start
+  then: approved
+  check: { class: com.example.OrderActions, method: charge, input: { creditLimit: 1000 } }
+```
+
+```java
+public boolean charge(OrderContext order, Map<String, String> input) {
+    return order.getAmount() <= Integer.parseInt(input.get("creditLimit"));
+}
+```
+
+Every value is text, exactly as written in the file (`1000` is `"1000"`, `1.50` is `"1.50"`), so
+there is nothing to cast; the map is read-only. A value must be a single text: a nested map, a list
+or an empty value (`limit:`) fails the build; write `''` for an empty text. If the method's second
+parameter does not fit the input (a `String` for a map, say), the build fails and names the method
+it expected.
 
 ## Decision rules
 
@@ -396,18 +418,18 @@ class is an error, so a typo is reported instead of quietly evaluating to false.
 cycles between decisions and malformed expressions fail when the file is loaded. A decision may refer
 to a rule set loaded earlier as `otherSet/name`, and one file may hold several rule sets separated by `---`.
 
-Load the rule file once at startup, then use a decision as a transition condition through
-`DecisionActor`, naming it `ruleSet/name` in `argParameter`:
+Load the rule file once at startup, then use a decision as a step's `check` through
+`DecisionActor`, naming it `ruleSet/name` in `input`:
 
 ```java
 DecisionRegistry.getDefault().load("classpath:decision/loan-rules.yaml");
 ```
 
 ```yaml
-- when: loan.check
-  fire: loan.approve
-  condition: { className: com.easysoft.decision.DecisionActor, methodName: evaluate, argParameter: loan.rules/autoApprove }
-  onFailedCondition: { to: this, fire: loan.triage }
+- step: assess
+  then: approve
+  check: { class: com.easysoft.decision.DecisionActor, method: evaluate, input: loan.rules/autoApprove }
+  onFalse: { nextStage: this, then: triage }
 ```
 
 Rules can also be used from code: `registry.evaluate("loan.rules/autoApprove", ctx)`, or
@@ -500,22 +522,25 @@ outcomes:
     default: REJECT
 ```
 
-Use it as a transition's **actor** with `methodName: decide`; the result becomes the last result,
-so the transition's `cases` route on it. A result with no matching case, or `null`, takes the
-transition's own `fire`:
+The word appears in both files with matching meanings: in the rule file, an outcome *decides* the
+result; in the flow, a step's `outcomes` list says *where each result goes*.
+
+Use it as a step's **action** with `method: decide`; the result becomes the last result,
+so the step's `outcomes` route on it. A result with no matching outcome, or `null`, takes the
+step's own `then`:
 
 ```yaml
-- when: loan.check
-  to: done.s
-  fire: loan.reject                              # REJECT, or anything else without a case
-  actor: { className: com.easysoft.decision.DecisionActor, methodName: decide, argParameter: loan.rules/loanOutcome }
-  cases:
-    - { when: APPROVE, to: done.s, fire: loan.approve }
-    - { when: REVIEW, to: done.s, fire: loan.review }
+- step: assess
+  nextStage: done
+  then: reject                                   # REJECT, or anything else without an outcome
+  action: { class: com.easysoft.decision.DecisionActor, method: decide, input: loan.rules/loanOutcome }
+  outcomes:
+    - { when: APPROVE, nextStage: done, then: approve }
+    - { when: REVIEW, nextStage: done, then: review }
 ```
 
-A case's `to` defaults to the current state, not to the transition's `to`, so give it when the
-target is another state. From code, `registry.decide("loan.rules/loanOutcome", ctx)` returns the
+An outcome's `nextStage` defaults to the current stage, not to the step's `nextStage`, so give it when
+the target is another stage. From code, `registry.decide("loan.rules/loanOutcome", ctx)` returns the
 result as a `String`. An outcome cannot be used inside a `when`, since it is not true/false. The
 full example is [`loan-outcome-flow.yaml`](src/test/resources/stm/loan-outcome-flow.yaml).
 
@@ -528,13 +553,13 @@ Register the bean-definition registry and point it at your files:
 public class StmConfig {
     @Bean
     public static STMBeanDefinitionRegistry stmBeanDefinitionRegistry() {
-        return new STMBeanDefinitionRegistry();   // or new STMBeanDefinitionRegistry("classpath:stm/order-flow.xml")
+        return new STMBeanDefinitionRegistry();   // or new STMBeanDefinitionRegistry("classpath:stm/order-flow.yaml")
     }
 }
 ```
 
 ```properties
-stm.config.locations=classpath:stm/order-flow.xml,classpath:stm/other-flow.xml
+stm.config.locations=classpath:stm/order-flow.yaml,classpath:stm/other-flow.yaml
 ```
 
 At startup the registry:
@@ -547,7 +572,7 @@ Look machines up by name with `STMFactory.getFsmAllStateful().get("order.flow")`
 ```java
 @Bean
 public StmStarter orderStarter() {
-    return new StmStarter("order.flow", "order.s", "order.received");
+    return new StmStarter("order.flow", "order", "received");
 }
 
 // later
@@ -564,14 +589,14 @@ OrderContext order = new OrderContext(stm.createContextWithTrace(), "A-1", 100, 
 ```
 
 ```
-|order.received<-order.s(OrderActions@574caa3f#receive)->A-1(0)ms|order.validate<-order.s(OrderActions@6c629d6e#isValid)->true(0)ms
-|order.pay<-order.s(CallState@27abe2cd)->true(0)ms|payment.start<-payment.s(OrderActions@29444d75#charge)->true(0)ms
-|payment.approved<-payment.s(CallStateReturn@5479e3f)->payment...(0)ms|order.pay@RESULT<-order.s(CallStateResult@6fdb1f78)->payment...(0)ms
-|ship.choose<-shipping.s(OrderActions@7bfcd12c#shippingMethod)->STANDARD(0)ms|ship.standard<-shipping.s(OrderActions@24273305#shipStandard)->null(0)ms
-|order.complete<-shipping.s(PlaceHolder)->null(0)ms|Process is finished STOP
+|received<-order(OrderActions@574caa3f#receive)->A-1(0)ms|validate<-order(OrderActions@6c629d6e#isValid)->true(0)ms
+|pay<-order(CallState@27abe2cd)->true(0)ms|start<-payment(OrderActions@29444d75#charge)->true(0)ms
+|approved<-payment(CallStateReturn@5479e3f)->approved(0)ms|pay@RESULT<-order(CallStateResult@6fdb1f78)->approved(0)ms
+|choose<-shipping(OrderActions@7bfcd12c#shippingMethod)->STANDARD(0)ms|standard<-shipping(OrderActions@24273305#shipStandard)->null(0)ms
+|complete<-shipping(PlaceHolder)->null(0)ms|Process is finished STOP
 ```
 
-(Shown wrapped here; it is one line in the log.) Each step reads `event<-state(Actor#method)->result(duration)`.
+(Shown wrapped here; it is one line in the log.) Each entry reads `step<-stage(Actor#method)->result(duration)`.
 Override `toString()` in your actor classes to replace the `ClassName@hash` part with something shorter.
 
 Pass your own `STMTraceWriter` to `createContextWithTrace(writer)` to send traces elsewhere.
@@ -584,10 +609,10 @@ Pass your own `STMTraceWriter` to `createContextWithTrace(writer)` to send trace
 StatefulContext sc = ctx.getSTMContext();
 
 sc.start(ctx);                          // default start state/event
-sc.start(ctx, "payment.s", "payment.start");
+sc.start(ctx, "payment", "start");
 
-// inside an actor: jump somewhere else instead of following `fire`
-return ctx.getSTMContext().next(ctx, "shipping.s", "ship.express");
+// inside an actor: jump somewhere else instead of following `then`
+return ctx.getSTMContext().next(ctx, "shipping", "express");
 return ctx.getSTMContext().next(ctx, "order.validate");   // event in the current state
 ```
 
@@ -613,7 +638,7 @@ This compiles the project, runs the test suite, and writes a coverage report to
 `target/site/jacoco/index.html`.
 
 The tests cover the engine (`com.easysoft.stm`), the builder and configuration readers
-(`com.easysoft.stm.config`), the built-in actors, and the full order example in both XML and YAML.
+(`com.easysoft.stm.config`), the built-in actors, and and the full order example.
 `RegressionTest` and `ConfigRegressionTest` guard the bugs fixed so far (see [CHANGELOG.md](CHANGELOG.md)).
 
 ## Known issues

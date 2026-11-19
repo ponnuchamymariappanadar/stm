@@ -8,9 +8,9 @@ import org.slf4j.LoggerFactory;
 import com.easysoft.stm.STM.STMEvent;
 
 /**
- * Wraps an actor to implement {@code <Case>} routing: the actor's result is converted with
- * {@code toString()} and matched against the case {@code when} values, then {@code "default"}.
- * Without a match the flow follows the transition's normal {@code fire}.
+ * Wraps an actor to implement {@code outcomes} routing: the actor's result is converted with
+ * {@code toString()} and matched against the outcome {@code when} values, then {@code "default"}.
+ * Without a match the flow follows the step's normal {@code then}.
  */
 public class Choice<T extends STMContext> implements Actor<T> {
 	private  Logger logger = LoggerFactory.getLogger(Choice.class);
